@@ -126,48 +126,112 @@ async def home():
     show_panels("\n[1] Outer Sec  [2] Inner Sec  [3] LAUNCH  [0] Reset > ")
 
 async def outer_security_sequence(panel: int):
-    # Outer Security ON, Buzzer X
-    base = State.STRATEGIC_ALERT
-    update_panel(panel, base | State.OUTER_SECURITY, "BUZZER")
+    try:
+        # Outer Security ON, Buzzer X
+        base = State.STRATEGIC_ALERT
+        update_panel(panel, base | State.OUTER_SECURITY, "BUZZER")
+
+        # Turn off buzzer after 2 seconds
+        await asyncio.sleep(2.0)
+        update_panel(panel, base | State.OUTER_SECURITY, "") # Silence alarm
+
+        # Hold state for 5 seconds
+        await asyncio.sleep(3.0)
+        update_panel(panel, base, "") # Reset to home state
+    
+    except asyncio.CancelledError:
+        # handle task cancellation
+        update_panel(panel, State.STRATEGIC_ALERT, "")
+        raise
 
 async def inner_security_sequence(panel: int):
-    # Inner Security ON, Buzzer X
-    base = State.STRATEGIC_ALERT
-    update_panel(panel, base | State.INNER_SECURITY, "BUZZER")
+    try:
+        # Inner Security ON, Buzzer X
+        base = State.STRATEGIC_ALERT
+        update_panel(panel, base | State.INNER_SECURITY, "BUZZER")
+
+        # Turn off buzzer after 2 seconds
+        await asyncio.sleep(2.0)
+        update_panel(panel, base | State.INNER_SECURITY, "") # Silence alarm
+
+        # Hold state for 5 seconds
+        await asyncio.sleep(3.0)
+        update_panel(panel, base, "") # Reset to home state
+    
+    except asyncio.CancelledError:
+        # handle task cancellation
+        update_panel(panel, State.STRATEGIC_ALERT, "")
+        raise
 
 async def launch_sequence(panel: int):
-    current_flags = State.STRATEGIC_ALERT
-    
-    current_flags |= State.ENABLED
-    update_panel(panel, current_flags, "BELL")
-    await rand_delay()
-    
-    current_flags |= State.LAUNCH_CMD
-    update_panel(panel, current_flags, "BELL")
-    await rand_delay()
-    
-    current_flags |= State.LAUNCH_PROC
-    update_panel(panel, current_flags, "BELL")
-    await rand_delay()
-    
-    current_flags |= State.INNER_SECURITY
-    update_panel(panel, current_flags, "BUZZER")
-    await rand_delay()
+    try:
+        current_flags = State.STRATEGIC_ALERT
+        
+        # Go through launch sequence
+        current_flags |= State.ENABLED
+        for panel in range(len(PANELS)):
+            update_panel(panel, current_flags, "BELL")
+        await rand_delay()
+        
+        current_flags |= State.LAUNCH_CMD
+        for panel in range(len(PANELS)):
+            update_panel(panel, current_flags, "BELL")
+        await rand_delay()
+        
+        current_flags |= State.LAUNCH_PROC
+        for panel in range(len(PANELS)):
+            update_panel(panel, current_flags, "BELL")
+        await rand_delay()
+        
+        current_flags |= State.INNER_SECURITY
+        for panel in range(len(PANELS)):
+            update_panel(panel, current_flags, "BUZZER")
+        await rand_delay()
 
-    current_flags |= State.OUTER_SECURITY
-    update_panel(panel, current_flags, "BUZZER")
-    await rand_delay()
-    
-    current_flags |= State.MISSILE_AWAY
-    update_panel(panel, current_flags, "LIFTOFF")
-    
-    # Just hold the final state
-    await asyncio.sleep(10.0)
-    update_panel(panel, current_flags, "") # Silence alarm
+        current_flags |= State.OUTER_SECURITY
+        for panel in range(len(PANELS)):
+            update_panel(panel, current_flags, "BUZZER")
+        await rand_delay()
+        
+        current_flags |= State.MISSILE_AWAY
+        for panel in range(len(PANELS)):
+            update_panel(panel, current_flags, "LIFTOFF")
+        
+        # Switch to "after launch" state after 10 seconds
+        await asyncio.sleep(10.0)
+        current_flags = (State.NOT_AUTH | State.FAULT | State.WARHEAD_ALM | State.MISSILE_AWAY |
+                         State.OUTER_SECURITY | State.INNER_SECURITY)
+        for panel in range(len(PANELS)):
+            update_panel(panel, current_flags, "BUZZER")
+
+        # Turn off buzzer after 2 seconds
+        await asyncio.sleep(2.0)
+        for panel in range(len(PANELS)):
+            update_panel(panel, current_flags, "") # Silence alarm
+
+        # Hold state for 5 seconds
+        await asyncio.sleep(3.0)
+        current_flags = State.STRATEGIC_ALERT
+        for panel in range(len(PANELS)):
+            update_panel(panel, current_flags, "") # Reset to home state
+
+    except asyncio.CancelledError:
+        # handle task cancellation
+        for panel in range(len(PANELS)):
+            update_panel(panel, State.STRATEGIC_ALERT, "")
+        raise
 
 # ---------- HELPERS ----------
 
-def schedule_task(coro):
+# Might not free resources!!!
+async def schedule_task(coro):
+    # cancel existing tasks
+    for task in list(background_tasks):
+        task.cancel()
+    if background_tasks: await asyncio.sleep(0.1)
+    background_tasks.clear()    
+
+    # start new task
     task = asyncio.create_task(coro)
     background_tasks.add(task)
     task.add_done_callback(background_tasks.discard)
@@ -188,12 +252,12 @@ async def main():
 
         if cmd == "1":
             # Outer Security 
-            schedule_task(outer_security_sequence(random.randint(0, len(PANELS)-1)))
+            await schedule_task(outer_security_sequence(random.randint(0, 1)))
         elif cmd == "2":
             # Inner Security
-            schedule_task(inner_security_sequence(random.randint(0, len(PANELS)-1)))
+            await schedule_task(inner_security_sequence(random.randint(0, 1)))
         elif cmd == "3":
-            schedule_task(launch_sequence(random.randint(0, len(PANELS)-1)))
+            await schedule_task(launch_sequence(random.randint(0, len(PANELS)-1)))
         elif cmd == "0":
             await home()
         elif cmd == "q":
