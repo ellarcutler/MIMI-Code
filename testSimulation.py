@@ -118,7 +118,7 @@ async def home():
     if background_tasks: await asyncio.sleep(0.1)
     background_tasks.clear()
 
-    # Default State (Left Image Column 1): Strategic Alert ON, Sequence ON
+    # Default State : Strategic Alert ON, Sequence ON
     for i in range(len(PANELS)):
         panel_state[i] = State.STRATEGIC_ALERT
         panel_alarms[i] = ""
@@ -126,18 +126,16 @@ async def home():
     show_panels("\n[1] Outer Sec  [2] Inner Sec  [3] LAUNCH  [0] Reset > ")
 
 async def outer_security_sequence(panel: int):
-    # Left Image Column 2: Outer Security ON, Buzzer X
+    # Outer Security ON, Buzzer X
     base = State.STRATEGIC_ALERT
     update_panel(panel, base | State.OUTER_SECURITY, "BUZZER")
 
 async def inner_security_sequence(panel: int):
-    # Left Image Column 3: Inner Security ON, Buzzer X
-    # (Note: Usually inner implies outer was breached, but image shows them distinct)
+    # Inner Security ON, Buzzer X
     base = State.STRATEGIC_ALERT
     update_panel(panel, base | State.INNER_SECURITY, "BUZZER")
 
 async def launch_sequence(panel: int):
-    # Keeping the launch logic for fun, but removing the "Fault" transition at end
     current_flags = State.STRATEGIC_ALERT
     
     current_flags |= State.ENABLED
@@ -163,7 +161,7 @@ async def launch_sequence(panel: int):
     current_flags |= State.MISSILE_AWAY
     update_panel(panel, current_flags, "LIFTOFF")
     
-    # Just hold the final state, no fault
+    # Just hold the final state
     await asyncio.sleep(10.0)
     update_panel(panel, current_flags, "") # Silence alarm
 
@@ -189,10 +187,10 @@ async def main():
         cmd = cmd.strip()
 
         if cmd == "1":
-            # Outer Security (Left Image Col 2)
+            # Outer Security 
             schedule_task(outer_security_sequence(random.randint(0, len(PANELS)-1)))
         elif cmd == "2":
-            # Inner Security (Left Image Col 3)
+            # Inner Security
             schedule_task(inner_security_sequence(random.randint(0, len(PANELS)-1)))
         elif cmd == "3":
             schedule_task(launch_sequence(random.randint(0, len(PANELS)-1)))
