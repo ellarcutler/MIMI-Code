@@ -48,7 +48,8 @@ PANELS = ["A-LEFT", "A-RIGHT", "B-LEFT", "B-RIGHT", "C-LEFT"]
 
 panel_state = {i: State.STRATEGIC_ALERT for i in range(len(PANELS))}
 panel_alarms = {i: "" for i in range(len(PANELS))}
-background_tasks = set()
+panel_tasks = {}
+launch_task = None
 
 # ---------- DISPLAY ENGINE ----------
 
@@ -74,7 +75,7 @@ def get_styled_text(label, active_flags, target_flag):
 
 def show_panels(prompt_text=""):
     clear_screen()
-    print("\n === STRATEGIC SILO STATUS INDICATOR ===\n")
+    print("\n === STRATEGIC SILO STATUS INDICATOR (VISITOR CENTER) ===\n")
     
     header_row = "   "
     for name in PANELS:
@@ -113,12 +114,24 @@ async def rand_delay():
     await asyncio.sleep(random.uniform(2.0, 3.0))
 
 async def home():
-    for task in background_tasks:
-        task.cancel()
-    if background_tasks: await asyncio.sleep(0.1)
-    background_tasks.clear()
+    global launch_task
+    
+    # Cancel launch task if running
+    if launch_task:
+        launch_task.cancel()
+        try:
+            await asyncio.sleep(0.1)
+        except asyncio.CancelledError:
+            pass
+        launch_task = None
 
-    # Default State : Strategic Alert ON, Sequence ON
+    # Cancel all panel specific tasks
+    for task in list(panel_tasks.values()):
+        task.cancel()
+    await asyncio.sleep(0.1)
+    panel_tasks.clear()
+
+    # Reset all panels to default state
     for i in range(len(PANELS)):
         panel_state[i] = State.STRATEGIC_ALERT
         panel_alarms[i] = ""
@@ -163,7 +176,7 @@ async def inner_security_sequence(panel: int):
         update_panel(panel, State.STRATEGIC_ALERT, "")
         raise
 
-async def launch_sequence(panel: int):
+async def launch_sequence():
     try:
         current_flags = State.STRATEGIC_ALERT
         
@@ -223,18 +236,44 @@ async def launch_sequence(panel: int):
 
 # ---------- HELPERS ----------
 
-# Might not free resources!!!
-async def schedule_task(coro):
-    # cancel existing tasks
-    for task in list(background_tasks):
-        task.cancel()
-    if background_tasks: await asyncio.sleep(0.1)
-    background_tasks.clear()    
+async def schedule_task(panel, coro, is_launch=False):
+    global launch_task
 
-    # start new task
-    task = asyncio.create_task(coro)
-    background_tasks.add(task)
-    task.add_done_callback(background_tasks.discard)
+    if is_launch:
+        # Cancel launch if already running
+        if launch_task:
+            launch_task.cancel()
+            try:
+                await asyncio.sleep(0.1)
+            except asyncio.CancelledError:
+                pass
+        # Cancel all panel tasks while launch starts
+        for task in list(panel_tasks.values()):
+            task.cancel()
+        await asyncio.sleep(0.1)
+        panel_tasks.clear()
+
+        # Start launch and store globally
+        launch_task = asyncio.create_task(coro)
+        launch_task.add_done_callback(lambda t: globals().__setitem__('launch_task', None))
+
+    else:
+        # Cancel only the task on this panel
+        if panel in panel_tasks:
+            panel_tasks[panel].cancel()
+            await asyncio.sleep(0.1)
+            #panel_tasks.pop(panel)
+
+        # If launch is running, cancel it
+        if launch_task:
+            launch_task.cancel()
+            await asyncio.sleep(0.1)
+            launch_task = None
+
+        # Start the new panel task
+        task = asyncio.create_task(coro)
+        panel_tasks[panel] = task
+        task.add_done_callback(lambda t: panel_tasks.pop(panel, None))
 
 async def ainput(prompt: str = ""):
     with ThreadPoolExecutor(1, "AsyncInput") as executor:
@@ -252,12 +291,14 @@ async def main():
 
         if cmd == "1":
             # Outer Security 
-            await schedule_task(outer_security_sequence(random.randint(0, 1)))
+            panel = random.randint(0, 1)
+            await schedule_task(panel, outer_security_sequence(panel))
         elif cmd == "2":
             # Inner Security
-            await schedule_task(inner_security_sequence(random.randint(0, 1)))
+            panel = random.randint(0, 1)
+            await schedule_task(panel, inner_security_sequence(panel))
         elif cmd == "3":
-            await schedule_task(launch_sequence(random.randint(0, len(PANELS)-1)))
+            await schedule_task(0, launch_sequence(), is_launch=True)
         elif cmd == "0":
             await home()
         elif cmd == "q":
