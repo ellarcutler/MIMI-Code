@@ -106,7 +106,7 @@ def show_panels(prompt_text=""):
 def update_panel(panel: int, state: State, alarm_text: str = ""):
     panel_state[panel] = state
     panel_alarms[panel] = alarm_text
-    show_panels("\n[1] Outer Sec  [2] Inner Sec  [3] LAUNCH  [0] Reset > ")
+    show_panels("\n[1] Out [2] In [3] Launch [4] Not Auth [5] Lamp Test [0] Reset > ")
 
 # ---------- SEQUENCES FROM LEFT IMAGE ----------
 
@@ -136,7 +136,55 @@ async def home():
         panel_state[i] = State.STRATEGIC_ALERT
         panel_alarms[i] = ""
     
-    show_panels("\n[1] Outer Sec  [2] Inner Sec  [3] LAUNCH  [0] Reset > ")
+    show_panels("\n[1] Out [2] In [3] Launch [4] Not Auth [5] Lamp Test [0] Reset > ")
+
+
+async def not_authenticated_sequence(panel: int):
+    try:
+        # Not Auth (2) and Outer Sec (3) turn ON.
+        active_state = State.NOT_AUTH | State.OUTER_SECURITY
+        
+        # Turn lights on + Buzzer
+        update_panel(panel, active_state, "BUZZER")
+
+        # Hold buzzer for 2 seconds
+        await asyncio.sleep(2.0)
+        
+        # Silence buzzer, keep lights red
+        update_panel(panel, active_state, "") 
+
+        # Hold state for 3 seconds
+        await asyncio.sleep(3.0)
+        
+        # Reset to home (Green Light)
+        update_panel(panel, State.STRATEGIC_ALERT, "") 
+    
+    except asyncio.CancelledError:
+        update_panel(panel, State.STRATEGIC_ALERT, "")
+        raise
+
+async def lamp_test_sequence():
+    try:
+        # Calculate a state that is ALL flags combined
+        # We start with 0 and OR (|) every possible flag into it
+        all_on = State.OFF
+        for flag in State:
+            all_on |= flag
+            
+        # Apply to all panels immediately
+        for panel in range(len(PANELS)):
+            update_panel(panel, all_on, "LAMP TEST")
+            
+        # Hold for 3 seconds
+        await asyncio.sleep(3.0)
+        
+        # Return to home
+        await home()
+        
+    except asyncio.CancelledError:
+        # If interrupted, just let it go (home() handles cleanup)
+        pass
+
 
 async def outer_security_sequence(panel: int):
     try:
@@ -234,6 +282,9 @@ async def launch_sequence():
             update_panel(panel, State.STRATEGIC_ALERT, "")
         raise
 
+
+
+
 # ---------- HELPERS ----------
 
 async def schedule_task(panel, coro, is_launch=False):
@@ -299,12 +350,19 @@ async def main():
             await schedule_task(panel, inner_security_sequence(panel))
         elif cmd == "3":
             await schedule_task(0, launch_sequence(), is_launch=True)
+        elif cmd == "4":
+            # NOT AUTHENTICATED SEQUENCE
+            panel = random.randint(0, 1)
+            await schedule_task(panel, not_authenticated_sequence(panel))
+        elif cmd == "5":
+            # LAMP TEST
+            await schedule_task(0, lamp_test_sequence(), is_launch=True)
         elif cmd == "0":
             await home()
         elif cmd == "q":
             break
         
-        show_panels("\n[1] Outer Sec  [2] Inner Sec  [3] LAUNCH  [0] Reset > ")
+        show_panels("\n[1] Out [2] In [3] Launch [4] Not Auth [5] Lamp Test [0] Reset > ")
 
 if __name__ == "__main__":
     try:
