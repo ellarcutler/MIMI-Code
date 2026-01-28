@@ -75,7 +75,7 @@ def get_styled_text(label, active_flags, target_flag):
 
 def show_panels(prompt_text=""):
     clear_screen()
-    print("\n === STRATEGIC SILO STATUS INDICATOR (VISITOR CENTER) ===\n")
+    print("\n === MSIP STATUS INDICATOR ===\n")
     
     header_row = "   "
     for name in PANELS:
@@ -141,22 +141,26 @@ async def home():
 
 async def not_authenticated_sequence(panel: int):
     try:
-        # Not Auth (2) and Outer Sec (3) turn ON.
-        active_state = State.NOT_AUTH | State.OUTER_SECURITY
-        
-        # Turn lights on + Buzzer
-        update_panel(panel, active_state, "BUZZER")
+        # STEP 1: Strategic Alert turns OFF ("1 Off")
+        update_panel(panel, State.OFF, "") 
 
-        # Hold buzzer for 2 seconds
-        await asyncio.sleep(2.0)
-        
-        # Silence buzzer, keep lights red
-        update_panel(panel, active_state, "") 
+        # STEP 2: Not Authenticated turns ON ("2 On")
+        current_state = State.NOT_AUTH
+        update_panel(panel, current_state, "BUZZER")
+        await asyncio.sleep(1.0) 
 
-        # Hold state for 3 seconds
+        # STEP 3: Outer Security turns ON ("3 On")
+        current_state |= State.OUTER_SECURITY
+        update_panel(panel, current_state, "BUZZER")
+
+        # HOLD: Keep the alarm going for 3 seconds
         await asyncio.sleep(3.0)
         
-        # Reset to home (Green Light)
+        # SILENCE: Turn off buzzer, but keep lights red
+        update_panel(panel, current_state, "") 
+        await asyncio.sleep(3.0)
+        
+        # RESET: Return to Green
         update_panel(panel, State.STRATEGIC_ALERT, "") 
     
     except asyncio.CancelledError:
