@@ -3,9 +3,10 @@ import random
 import sys
 from enum import IntFlag, auto
 from concurrent.futures import ThreadPoolExecutor
+import evdev
 from evdev import InputDevice, categorize, ecodes
 import contextlib
-from gpiozero import OutputDevice
+from gpiozero import OutputDevice, Button
 import spidev
 
 # ---------- STATES ----------
@@ -64,6 +65,7 @@ MUX1 = OutputDevice(23) # physical 16
 MUX2 = OutputDevice(24) # physical 18
 MUX3 = OutputDevice(25) # physical 22
 STROBE_CS_L = OutputDevice(26, active_high=True, initial_value=True) # physical 37
+LAUNCH_BTN = Button(15, pull_up=True, bounce_time=0.1)
 
 # ---------- SPI SETUP ----------
 spi = spidev.SpiDev()
@@ -467,12 +469,22 @@ def write_panel(panel: int, flags: State):
     lsb = word16 & 0xFF
 
     select_panel(panel)
+    STROBE_CS_L.off()
     spi.xfer2([msb, lsb])
-    strobe_latch()
+
+    STROBE_CS_L.on()
+    #strobe_latch()
 
 def set_panel(panel: int, flags: State):
     panel_state[panel] = flags
     write_panel(panel, flags)
+
+def button_callback(cmd_q):
+    loop = asyncio.get_event_loop()
+    loop.call_soon_threadsafe(cmd_q.put_nowait, "3")
+
+def handle_button_press(loop, q):
+    loop.call_soon_threadsafe(q.put_nowait, "3")
 
 # ---------- MAIN ----------
 
@@ -481,7 +493,16 @@ async def main():
     
     cmd_q: aysncio.Queue[str] = asyncio.Queue()
 
-    dev_path = "/dev/input/event0"
+    #dev_path = "/dev/input/event0"
+
+    main_loop = asyncio.get_running_loop()
+    LAUNCH_BTN.when_pressed = lambda: handle_button_press(main_loop, cmd_q)
+
+    try:
+        devices = [InputDevice(path) for path in evdev.list_devices()]
+        dev_path = devices[0].path if devices else "/dev/input/event0"
+    except OSError:
+        dev_path = "/dev/input/event0"
 
     listener_task = asyncio.create_task(evdev_listener(dev_path, cmd_q))
 
