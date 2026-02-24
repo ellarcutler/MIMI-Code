@@ -8,6 +8,9 @@ from evdev import InputDevice, categorize, ecodes
 import contextlib
 from gpiozero import OutputDevice, Button
 import spidev
+import time
+import subprocess
+from smbus2 import SMBus
 
 # ---------- STATES ----------
 
@@ -54,6 +57,7 @@ KEY_TO_CMD = {
     ecodes.KEY_3: "3", # LAUNCH
     ecodes.KEY_4: "4", # NOT AUTH
     ecodes.KEY_5: "5", # LAMP TEST
+    ecodes.KEY_6: "6", # PLAY AUDIO
     ecodes.KEY_HOMEPAGE: "0", # HOME
     ecodes.KEY_BACKSPACE: "q", # QUIT
 }
@@ -66,12 +70,26 @@ MUX2 = OutputDevice(24) # physical 18
 MUX3 = OutputDevice(25) # physical 22
 STROBE_CS_L = OutputDevice(26, active_high=True, initial_value=True) # physical 37
 LAUNCH_BTN = Button(15, pull_up=True, bounce_time=0.1)
+OE_ALL_U_L = OutputDevice(12, active_high=True, initial_value=True) # physical 32
+AUDIO_MUTE = OutputDevice(4) # physical 7
+
 
 # ---------- SPI SETUP ----------
 spi = spidev.SpiDev()
 spi.open(0,0)
 spi.max_speed_hz = 1_000_000
-spi.mode = 0
+spi.mode = 3
+
+# ---------- I2C SETUP ----------
+AMP_I2C_BUS = 1
+AMP_I2C_ADDR = 0x4D
+
+AMP4_INIT_WRITES = [
+        (0x35, 0x58), # standard i2s
+        (0x36, 0x53), # enable limiter + default i2s sck polarity
+
+        (0x1D, 0x02), # power mode profile
+    ]
 
 # ---------- VISUAL LAYOUT ----------
 
@@ -93,7 +111,7 @@ VISUAL_SLOTS = [
     ("ANTI-JAM MODE", State.ANTI_JAM),
     ]
 
-PANELS = ["A-LEFT", "A-RIGHT", "B-LEFT", "B-RIGHT", "C-LEFT"] 
+PANELS = ["A-LEFT", "A-RIGHT", "B-LEFT", "B-RIGHT", "C-LEFT", "C-RIGHT", "D-LEFT", "D-RIGHT", "E-LEFT", "E-RIGHT"] 
 
 panel_state = {i: State.STRATEGIC_ALERT for i in range(len(PANELS))}
 panel_alarms = {i: "" for i in range(len(PANELS))}
@@ -352,6 +370,15 @@ async def launch_sequence():
             set_panel(panel, current_flags)
         raise
 
+def play_audio():
+    filepath = "/home/MSIP/sounds/pas_3s.wav"
+
+    subprocess.Popen(
+            ["aplay", "-q", filepath],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
 
 
 
@@ -436,12 +463,32 @@ async def dispatch_cmd(cmd: str):
     elif cmd == "5":
         # Lamp Test
         await schedule_task(0, lamp_test_sequence(), is_launch=True)
+    elif cmd == "6":
+        play_audio()
     elif cmd == "0":
         await home()
     elif cmd == "q":
         raise SystemExit
     
     show_panels("\n[1] Out [2] In [3] Launch [4] Not Auth [5] Lamp Test [0] Reset > ")
+
+def initialize_display():
+    OE_ALL_U_L.on() # disable
+
+    # add function to drive all LEDs to off
+
+    time.sleep(10e-6)
+
+    OE_ALL_U_L.off()
+
+def initialize_audio():
+    AUDIO_MUTE.off()
+
+    #with SMBus(AMP_I2C_BUS) as bus:
+    #    for reg, val in AMP4_INIT_WRITES:
+    #        bus.write_byte_data(AMP_I2C_ADDR, reg & 0xFF, val & 0xFF)
+    #        time.sleep(delay_s)
+
 
 def select_panel(n: int):
     MUX3.value = (n >> 3) & 1
@@ -451,8 +498,7 @@ def select_panel(n: int):
 
 def strobe_latch():
     STROBE_CS_L.off()
-
-    import time 
+ 
     time.sleep(10e-6)
     STROBE_CS_L.on()
 
@@ -469,9 +515,10 @@ def write_panel(panel: int, flags: State):
     lsb = word16 & 0xFF
 
     select_panel(panel)
-    STROBE_CS_L.off()
     spi.xfer2([msb, lsb])
 
+    STROBE_CS_L.off()
+    time.sleep(10e-6)
     STROBE_CS_L.on()
     #strobe_latch()
 
@@ -489,20 +536,23 @@ def handle_button_press(loop, q):
 # ---------- MAIN ----------
 
 async def main():
+    initialize_display()
+    initialize_audio()
+
     await home()
     
     cmd_q: aysncio.Queue[str] = asyncio.Queue()
 
-    #dev_path = "/dev/input/event0"
+    dev_path = "/dev/input/event0"
 
     main_loop = asyncio.get_running_loop()
-    LAUNCH_BTN.when_pressed = lambda: handle_button_press(main_loop, cmd_q)
+    #LAUNCH_BTN.when_pressed = lambda: handle_button_press(main_loop, cmd_q)
 
-    try:
-        devices = [InputDevice(path) for path in evdev.list_devices()]
-        dev_path = devices[0].path if devices else "/dev/input/event0"
-    except OSError:
-        dev_path = "/dev/input/event0"
+    #try:
+     #   devices = [InputDevice(path) for path in evdev.list_devices()]
+      #  dev_path = devices[0].path if devices else "/dev/input/event0"
+    #except OSError:
+     #   dev_path = "/dev/input/event0"
 
     listener_task = asyncio.create_task(evdev_listener(dev_path, cmd_q))
 
