@@ -11,6 +11,7 @@ import spidev
 import time
 import subprocess
 from smbus2 import SMBus
+import simpleaudio as sa
 
 # ---------- STATES ----------
 
@@ -370,15 +371,21 @@ async def launch_sequence():
             set_panel(panel, current_flags)
         raise
 
-def play_audio():
-    filepath = "/home/MSIP/sounds/pas_3s.wav"
 
-    subprocess.Popen(
-            ["aplay", "-q", filepath],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
-        )
+def play_buzz():
+    wave_obj = sa.WaveObject.from_wave_file("buzzer_2s.wav")
+    play_obj = wave_obj.play()
+    play_obj.wait_done()
+
+def play_bell():
+    wave_obj = sa.WaveObject.from_wave_file("bell_2s.wav")
+    play_obj = wave_obj.play()
+    play_obj.wait_done()
+
+def play_pass():
+    wave_obj = sa.WaveObject.from_wave_file("pas_3s.wav")
+    play_obj = wave_obj.play()
+    play_obj.wait_done()
 
 
 
@@ -464,7 +471,7 @@ async def dispatch_cmd(cmd: str):
         # Lamp Test
         await schedule_task(0, lamp_test_sequence(), is_launch=True)
     elif cmd == "6":
-        play_audio()
+        play_buzz()
     elif cmd == "0":
         await home()
     elif cmd == "q":
