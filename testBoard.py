@@ -11,7 +11,7 @@ import spidev
 import time
 import subprocess
 from smbus2 import SMBus
-import simpleaudio as sa
+import os
 
 # ---------- STATES ----------
 
@@ -72,7 +72,7 @@ MUX3 = OutputDevice(25) # physical 22
 STROBE_CS_L = OutputDevice(26, active_high=True, initial_value=True) # physical 37
 LAUNCH_BTN = Button(15, pull_up=True, bounce_time=0.1)
 OE_ALL_U_L = OutputDevice(12, active_high=True, initial_value=True) # physical 32
-AUDIO_MUTE = OutputDevice(4) # physical 7
+AUDIO_MUTE = OutputDevice(4, active_high=True, initial_value=True) # physical 7
 
 
 # ---------- SPI SETUP ----------
@@ -265,7 +265,7 @@ async def outer_security_sequence(panel: int):
         base = State.STRATEGIC_ALERT
         update_panel(panel, base | State.OUTER_SECURITY, "BUZZER")
         set_panel(panel, base | State.OUTER_SECURITY)
-
+        play_buzz()
         # Turn off buzzer after 2 seconds
         await asyncio.sleep(2.0)
         update_panel(panel, base | State.OUTER_SECURITY, "") # Silence alarm
@@ -371,22 +371,20 @@ async def launch_sequence():
             set_panel(panel, current_flags)
         raise
 
-
+#def play_audio():
+#    filepath = "/home/MSIP/sounds/pas_3s.wav"
+#
+#    subprocess.Popen(
+#            ["aplay", "-q", filepath],
+#            stdout=subprocess.DEVNULL,
+#            stderr=subprocess.DEVNULL,
+#            start_new_session=True,
+#        )
+    
 def play_buzz():
-    wave_obj = sa.WaveObject.from_wave_file("buzzer_2s.wav")
-    play_obj = wave_obj.play()
-    play_obj.wait_done()
-
-def play_bell():
-    wave_obj = sa.WaveObject.from_wave_file("bell_2s.wav")
-    play_obj = wave_obj.play()
-    play_obj.wait_done()
-
-def play_pass():
-    wave_obj = sa.WaveObject.from_wave_file("pas_3s.wav")
-    play_obj = wave_obj.play()
-    play_obj.wait_done()
-
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    sound_path = os.path.join(base_dir, "..", "sounds", "pas_3s.wav")
+    subprocess.run(["aplay", sound_path], check=False)
 
 
 # ---------- HELPERS ----------
@@ -489,7 +487,7 @@ def initialize_display():
     OE_ALL_U_L.off()
 
 def initialize_audio():
-    AUDIO_MUTE.off()
+    AUDIO_MUTE.on()
 
     #with SMBus(AMP_I2C_BUS) as bus:
     #    for reg, val in AMP4_INIT_WRITES:
