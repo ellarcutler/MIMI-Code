@@ -70,7 +70,12 @@ MUX1 = OutputDevice(23) # physical 16
 MUX2 = OutputDevice(24) # physical 18
 MUX3 = OutputDevice(25) # physical 22
 STROBE_CS_L = OutputDevice(26, active_high=True, initial_value=True) # physical 37
-LAUNCH_BTN = Button(15, pull_up=True, bounce_time=0.1)
+BTN0 = Button(15, pull_up=True, bounce_time=0.1)
+BTN1 = Button(14, pull_up=True, bounce_time=0.1)
+BTN2 = Button(8,  pull_up=True, bounce_time=0.1)
+BTN3 = Button(6,  pull_up=True, bounce_time=0.1)
+BTN4 = Button(17, pull_up=True, bounce_time=0.1)
+BTN5 = Button(27, pull_up=True, bounce_time=0.1)
 OE_ALL_U_L = OutputDevice(12, active_high=True, initial_value=True) # physical 32
 AUDIO_MUTE = OutputDevice(4, active_high=True, initial_value=True) # physical 7
 
@@ -551,7 +556,7 @@ async def main():
     dev_path = "/dev/input/event0"
 
     main_loop = asyncio.get_running_loop()
-    #LAUNCH_BTN.when_pressed = lambda: handle_button_press(main_loop, cmd_q)
+    BTN0.when_pressed = lambda: handle_button_press(main_loop, cmd_q)
 
     #try:
      #   devices = [InputDevice(path) for path in evdev.list_devices()]
