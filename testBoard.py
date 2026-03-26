@@ -381,7 +381,7 @@ async def launch_sequence():
 
 
 
-audio_process = None;
+audio_process = None
 def play_sound(filename: str):
     global audio_process
 
@@ -446,6 +446,26 @@ async def schedule_task(panel, coro, is_launch=False):
         panel_tasks[panel] = task
         task.add_done_callback(lambda t: panel_tasks.pop(panel, None))
 
+async def cancel_all():
+    global launch_task
+
+    # Cancel launch
+    if launch_task:
+        launch_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await launch_task
+        launch_task = None
+
+    # Cancel all panel tasks
+    for task in panel_tasks.values():
+        task.cancel()
+
+    for task in panel_tasks.values():
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+    panel_tasks.clear()
+
 async def ainput(prompt: str = ""):
     with ThreadPoolExecutor(1, "AsyncInput") as executor:
         return await asyncio.get_running_loop().run_in_executor(
@@ -467,7 +487,7 @@ async def evdev_listener(dev_path: str, cmd_q: asyncio.Queue):
 
 async def dispatch_cmd(cmd: str):
     cmd = cmd.strip()
-
+    await cancel_all()
     if cmd == "1":
         # Outer Security 
         panel = random.randint(0, 1)
