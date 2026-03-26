@@ -456,11 +456,13 @@ async def cancel_all():
             await launch_task
         launch_task = None
 
+    tasks = list(panel_tasks.values())
+
     # Cancel all panel tasks
-    for task in panel_tasks.values():
+    for task in tasks:
         task.cancel()
 
-    for task in panel_tasks.values():
+    for task in tasks:
         with contextlib.suppress(asyncio.CancelledError):
             await task
 
@@ -487,7 +489,7 @@ async def evdev_listener(dev_path: str, cmd_q: asyncio.Queue):
 
 async def dispatch_cmd(cmd: str):
     cmd = cmd.strip()
-    await cancel_all()
+    await home()
     if cmd == "1":
         # Outer Security 
         panel = random.randint(0, 1)
@@ -512,6 +514,14 @@ async def dispatch_cmd(cmd: str):
         await home()
     elif cmd == "q":
         raise SystemExit
+    elif cmd == "+":
+        m = alsaaudio.Mixer('Digital')
+        current_volume = m.getvolume()
+        m.setvolume(current_volume[0]+2)
+    elif cmd == "-":
+        m = alsaaudio.Mixer('Digital')
+        current_volume = m.getvolume()
+        m.setvolume(current_volume[0]-2)
     
     show_panels("\n[1] Out [2] In [3] Launch [4] Not Auth [5] Lamp Test [0] Reset > ")
 
