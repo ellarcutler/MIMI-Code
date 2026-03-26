@@ -376,21 +376,28 @@ async def launch_sequence():
             set_panel(panel, current_flags)
         raise
 
-#def play_audio():
-#    filepath = "/home/MSIP/sounds/pas_3s.wav"
-#
-#    subprocess.Popen(
-#            ["aplay", "-q", filepath],
-#            stdout=subprocess.DEVNULL,
-#            stderr=subprocess.DEVNULL,
-#            start_new_session=True,
-#        )
-    
-def play_buzz():
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    sound_path = os.path.join(base_dir, "..", "sounds", "pas_3s.wav")
-    subprocess.run(["aplay", sound_path], check=False)
+def play_sound(filename: str):
+    global audio_process
 
+    # Stop current sound if playing
+    if audio_process and audio_process.poll() is None:
+        audio_process.terminate()
+
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    sound_path = os.path.join(base_dir, "..", "sounds", filename)
+
+    audio_process = subprocess.Popen(["aplay", sound_path])
+
+def play_bell():
+    play_sound("bell_2s.wav")
+
+
+def play_buzzer():
+    play_sound("buzzer_2s.wav")
+
+
+def play_buzz():
+    play_sound("pas_3s.wav")
 
 # ---------- HELPERS ----------
 
@@ -536,12 +543,9 @@ def set_panel(panel: int, flags: State):
     panel_state[panel] = flags
     write_panel(panel, flags)
 
-def button_callback(cmd_q):
-    loop = asyncio.get_event_loop()
-    loop.call_soon_threadsafe(cmd_q.put_nowait, "3")
 
-def handle_button_press(loop, q):
-    loop.call_soon_threadsafe(q.put_nowait, "3")
+def handle_button_press(loop, q, cmd):
+    loop.call_soon_threadsafe(q.put_nowait, cmd)
 
 # ---------- MAIN ----------
 
@@ -551,12 +555,16 @@ async def main():
 
     await home()
     
-    cmd_q: aysncio.Queue[str] = asyncio.Queue()
+    cmd_q: asyncio.Queue[str] = asyncio.Queue()
 
     dev_path = "/dev/input/event0"
 
     main_loop = asyncio.get_running_loop()
-    BTN0.when_pressed = lambda: handle_button_press(main_loop, cmd_q)
+    BTN0.when_pressed = lambda: handle_button_press(main_loop, cmd_q, "1")
+    BTN1.when_pressed = lambda: handle_button_press(main_loop, cmd_q, "2")
+    BTN2.when_pressed = lambda: handle_button_press(main_loop, cmd_q, "3")
+    BTN3.when_pressed = lambda: handle_button_press(main_loop, cmd_q, "4")
+    BTN4.when_pressed = lambda: handle_button_press(main_loop, cmd_q, "5")
 
     #try:
      #   devices = [InputDevice(path) for path in evdev.list_devices()]
