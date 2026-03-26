@@ -11,6 +11,7 @@ import spidev
 import time
 import subprocess
 from smbus2 import SMBus
+import alsaaudio
 import os
 
 # ---------- STATES ----------
@@ -61,6 +62,8 @@ KEY_TO_CMD = {
     ecodes.KEY_6: "6", # PLAY AUDIO
     ecodes.KEY_HOMEPAGE: "0", # HOME
     ecodes.KEY_BACKSPACE: "q", # QUIT
+    ecodes.KEY_VOLUMEUP: "+", # VOLUME UP
+    ecodes.KEY_VOLUMEDOWN: "-", # VOLUME DOWN
 }
 
 # ---------- PINS -----------
@@ -376,6 +379,9 @@ async def launch_sequence():
             set_panel(panel, current_flags)
         raise
 
+
+
+audio_process = None;
 def play_sound(filename: str):
     global audio_process
 
