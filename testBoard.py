@@ -80,7 +80,7 @@ BTN3 = Button(6,  pull_up=True, bounce_time=0.1)
 BTN4 = Button(17, pull_up=True, bounce_time=0.1)
 BTN5 = Button(27, pull_up=True, bounce_time=0.1)
 OE_ALL_U_L = OutputDevice(12, active_high=True, initial_value=True) # physical 32
-AUDIO_MUTE = OutputDevice(4, active_high=True, initial_value=True) # physical 7
+AUDIO_MUTE = OutputDevice(4, active_high=False, initial_value=True) # physical 7
 
 
 # ---------- SPI SETUP ----------
@@ -186,9 +186,6 @@ def update_panel(panel: int, state: State, alarm_text: str = ""):
 
 # ---------- SEQUENCES FROM LEFT IMAGE ----------
 
-async def rand_delay():
-    await asyncio.sleep(random.uniform(2.0, 3.0))
-
 async def home():
     global launch_task
     
@@ -224,6 +221,7 @@ async def not_authenticated_sequence(panel: int):
         # Turn lights on + Buzzer
         update_panel(panel, active_state, "BUZZER")
         set_panel(panel, active_state)
+        play_buzzer_2s()
 
         # Hold buzzer for 2 seconds
         await asyncio.sleep(2.0)
@@ -241,6 +239,7 @@ async def not_authenticated_sequence(panel: int):
     except asyncio.CancelledError:
         update_panel(panel, State.STRATEGIC_ALERT, "")
         set_panel(panel, State.STRATEGIC_ALERT)
+        stop_sound()
         raise
 
 async def lamp_test_sequence():
@@ -273,7 +272,8 @@ async def outer_security_sequence(panel: int):
         base = State.STRATEGIC_ALERT
         update_panel(panel, base | State.OUTER_SECURITY, "BUZZER")
         set_panel(panel, base | State.OUTER_SECURITY)
-        play_buzz()
+        play_buzzer_1s()
+
         # Turn off buzzer after 2 seconds
         await asyncio.sleep(2.0)
         update_panel(panel, base | State.OUTER_SECURITY, "") # Silence alarm
@@ -288,6 +288,7 @@ async def outer_security_sequence(panel: int):
         # handle task cancellation
         update_panel(panel, State.STRATEGIC_ALERT, "")
         set_panel(panel, State.STRATEGIC_ALERT)
+        stop_sound()
         raise
 
 async def inner_security_sequence(panel: int):
@@ -296,6 +297,7 @@ async def inner_security_sequence(panel: int):
         base = State.STRATEGIC_ALERT
         update_panel(panel, base | State.INNER_SECURITY, "BUZZER")
         set_panel(panel, base | State.INNER_SECURITY)
+        play_buzzer_1s()
 
         # Turn off buzzer after 2 seconds
         await asyncio.sleep(2.0)
@@ -310,41 +312,49 @@ async def inner_security_sequence(panel: int):
         # handle task cancellation
         update_panel(panel, State.STRATEGIC_ALERT, "")
         set_panel(panel, State.STRATEGIC_ALERT)
+        stop_sound()
         raise
 
 async def launch_sequence():
     try:
         current_flags = State.STRATEGIC_ALERT
+
+        await asyncio.sleep(start_delay)
         
         # Go through launch sequence
         current_flags |= State.ENABLED
         for panel in range(len(PANELS)):
             update_panel(panel, current_flags, "BELL")
             set_panel(panel, current_flags)
+        play_bell_1s()
         await rand_delay()
         
         current_flags |= State.LAUNCH_CMD
         for panel in range(len(PANELS)):
             update_panel(panel, current_flags, "BELL")
             set_panel(panel, current_flags)
+        play_bell_1s()
         await rand_delay()
         
         current_flags |= State.LAUNCH_PROC
         for panel in range(len(PANELS)):
             update_panel(panel, current_flags, "BELL")
             set_panel(panel, current_flags)
+        play_bell_2s()
         await rand_delay()
         
         current_flags |= State.INNER_SECURITY
         for panel in range(len(PANELS)):
             update_panel(panel, current_flags, "BUZZER")
             set_panel(panel, current_flags)
+        play_buzzer_1s()
         await rand_delay()
 
         current_flags |= State.OUTER_SECURITY
         for panel in range(len(PANELS)):
             update_panel(panel, current_flags, "BUZZER")
             set_panel(panel, current_flags)
+        play_buzzer_1s()
         await rand_delay()
         
         current_flags |= State.MISSILE_AWAY
@@ -359,6 +369,7 @@ async def launch_sequence():
         for panel in range(len(PANELS)):
             update_panel(panel, current_flags, "BUZZER")
             set_panel(panel, current_flags)
+        play_buzzer_2s()
 
         # Turn off buzzer after 2 seconds
         await asyncio.sleep(2.0)
@@ -377,35 +388,79 @@ async def launch_sequence():
         for panel in range(len(PANELS)):
             update_panel(panel, State.STRATEGIC_ALERT, "")
             set_panel(panel, current_flags)
+        stop_sound()
         raise
 
+async def launch_sequence_per_panel(panel: int, start_delay: float):
+    try:
+        current_flags = State.STRATEGIC_ALERT
 
+        await asyncio.sleep(start_delay)
 
-audio_process = None
-def play_sound(filename: str):
-    global audio_process
+        # Go through launch sequence
+        current_flags |= State.ENABLED
+        update_panel(panel, current_flags, "BELL")
+        set_panel(panel, current_flags)
+        play_bell_1s()
+        await rand_delay()
 
-    # Stop current sound if playing
-    if audio_process and audio_process.poll() is None:
-        audio_process.terminate()
+        current_flags |= State.LAUNCH_CMD
+        update_panel(panel, current_flags, "BELL")
+        set_panel(panel, current_flags)
+        play_bell_1s()
+        await rand_delay()
 
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    sound_path = os.path.join(base_dir, "..", "sounds", filename)
+        current_flags |= State.LAUNCH_PROC
+        update_panel(panel, current_flags, "BELL")
+        set_panel(panel, current_flags)
+        play_bell_2s()
+        await rand_delay()
 
-    audio_process = subprocess.Popen(["aplay", sound_path])
+        current_flags |= State.INNER_SECURITY
+        update_panel(panel, current_flags, "BUZZER")
+        set_panel(panel, current_flags)
+        play_buzzer_1s()
+        await rand_delay()
 
-def play_bell():
-    play_sound("bell_2s.wav")
+        current_flags |= State.OUTER_SECURITY
+        update_panel(panel, current_flags, "BUZZER")
+        set_panel(panel, current_flags)
+        play_buzzer_1s()
+        await rand_delay()
 
+        current_flags |= State.MISSILE_AWAY
+        update_panel(panel, current_flags, "LIFTOFF")
+        set_panel(panel, current_flags)
 
-def play_buzzer():
-    play_sound("buzzer_2s.wav")
+        # Switch to "after launch" state after 10 seconds
+        await asyncio.sleep(10.0)
+        current_flags = (State.NOT_AUTH | State.FAULT | State.WARHEAD_ALM | State.MISSILE_AWAY |
+                         State.OUTER_SECURITY | State.INNER_SECURITY)
+        update_panel(panel, current_flags, "BUZZER")
+        set_panel(panel, current_flags)
+        play_buzzer_2s()
 
+        # Turn off buzzer after 2 seconds
+        await asyncio.sleep(2.0)
+        update_panel(panel, current_flags, "")
 
-def play_buzz():
-    play_sound("pas_3s.wav")
+        # Hold state for 5 seconds
+        await asyncio.sleep(3.0)
+        current_flags = State.STRATEGIC_ALERT
+        update_panel(panel, current_flags, "") # Reset to home state
+        set_panel(panel, current_flags)
+
+    except asyncio.CancelledError:
+        # handle task cancellation
+        update_panel(panel, State.STRATEGIC_ALERT, "")
+        set_panel(panel, current_flags)
+        stop_sound()
+        raise
 
 # ---------- HELPERS ----------
+
+async def rand_delay():
+    await asyncio.sleep(random.uniform(1.0, 4.0))
 
 async def schedule_task(panel, coro, is_launch=False):
     global launch_task
@@ -425,8 +480,9 @@ async def schedule_task(panel, coro, is_launch=False):
         panel_tasks.clear()
 
         # Start launch and store globally
-        launch_task = asyncio.create_task(coro)
-        launch_task.add_done_callback(lambda t: globals().__setitem__('launch_task', None))
+        for panel in range(len(PANELS)):
+            launch_task = asyncio.create_task(coro)
+            launch_task.add_done_callback(lambda t: globals().__setitem__('launch_task', None))
 
     else:
         # Cancel only the task on this panel
@@ -446,27 +502,27 @@ async def schedule_task(panel, coro, is_launch=False):
         panel_tasks[panel] = task
         task.add_done_callback(lambda t: panel_tasks.pop(panel, None))
 
-async def cancel_all():
-    global launch_task
-
-    # Cancel launch
-    if launch_task:
-        launch_task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await launch_task
-        launch_task = None
-
-    tasks = list(panel_tasks.values())
-
-    # Cancel all panel tasks
-    for task in tasks:
-        task.cancel()
-
-    for task in tasks:
-        with contextlib.suppress(asyncio.CancelledError):
-            await task
-
-    panel_tasks.clear()
+#async def cancel_all():
+#    global launch_task
+#
+#    # Cancel launch
+#    if launch_task:
+#        launch_task.cancel()
+#        with contextlib.suppress(asyncio.CancelledError):
+#           await launch_task
+#        launch_task = None
+#
+#    tasks = list(panel_tasks.values())
+#
+#    # Cancel all panel tasks
+#    for task in tasks:
+#        task.cancel()
+#
+#    for task in tasks:
+#        with contextlib.suppress(asyncio.CancelledError):
+#            await task
+#
+#    panel_tasks.clear()
 
 async def ainput(prompt: str = ""):
     with ThreadPoolExecutor(1, "AsyncInput") as executor:
@@ -500,7 +556,11 @@ async def dispatch_cmd(cmd: str):
         await schedule_task(panel, inner_security_sequence(panel))
     elif cmd == "3":
         # Launch Sequence
-        await schedule_task(0, launch_sequence(), is_launch=True)
+        for panel in range(len(PANELS)):
+            delay = random.uniform(1.0, 4.0)
+            task = asyncio.create_task(launch_sequence_per_panel(panel, delay))
+            panel_tasks[panel] = task
+        #await schedule_task(0, launch_sequence(delay), is_launch=True)
     elif cmd == "4":
         # Not Authenticated
         panel = random.randint(0, 1)
@@ -509,7 +569,7 @@ async def dispatch_cmd(cmd: str):
         # Lamp Test
         await schedule_task(0, lamp_test_sequence(), is_launch=True)
     elif cmd == "6":
-        play_buzz()
+        play_pas()
     elif cmd == "0":
         await home()
     elif cmd == "q":
@@ -525,6 +585,7 @@ async def dispatch_cmd(cmd: str):
     
     show_panels("\n[1] Out [2] In [3] Launch [4] Not Auth [5] Lamp Test [0] Reset > ")
 
+
 def initialize_display():
     OE_ALL_U_L.on() # disable
 
@@ -534,8 +595,56 @@ def initialize_display():
 
     OE_ALL_U_L.off()
 
-def initialize_audio():
+audio_process = None
+
+def stop_sound():
+    global audio_process
+
+    # Stop current sound if playing
+    if audio_process and audio_process.poll() is None:
+        mute_audio()
+        #time.sleep(0.02)
+        audio_process.terminate()
+        try:
+            audio_process.wait(timeout=0.001)
+        except subprocess.TimeoutExpired:
+            audio_process.kill()
+            audio_process.wait()
+    audio_process = None
+
+def play_sound(filename: str):
+    global audio_process
+
+    stop_sound()
+
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    sound_path = os.path.join(base_dir, "..", "sounds", filename)
+
+    mute_audio()
+    audio_process = subprocess.Popen(["aplay", sound_path])
+    time.sleep(0.02) # let amp settle
+    unmute_audio()
+
+def play_bell_1s():
+    play_sound("bell_1s2.wav")
+
+def play_bell_2s():
+    play_sound("bell_2s.wav")
+
+def play_buzzer_1s():
+    play_sound("buzzer_1s.wav")
+
+def play_buzzer_2s():
+    play_sound("buzzer_2s.wav")
+
+def play_pas():
+    play_sound("pas_3s.wav")
+
+def mute_audio():
     AUDIO_MUTE.on()
+
+def unmute_audio():
+    AUDIO_MUTE.off()
 
     #with SMBus(AMP_I2C_BUS) as bus:
     #    for reg, val in AMP4_INIT_WRITES:
@@ -587,7 +696,6 @@ def handle_button_press(loop, q, cmd):
 
 async def main():
     initialize_display()
-    initialize_audio()
 
     await home()
     
