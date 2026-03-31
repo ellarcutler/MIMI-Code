@@ -498,9 +498,9 @@ def initialize_display():
 
     OE_ALL_U_L.off()
 
-MAX_VOLUME = 134
+MAX_VOLUME = 90
 MIN_VOLUME = 0
-DEFAULT_VOLUME = 62
+DEFAULT_VOLUME = 30
 
 def initialize_audio():
     vol = load_volume()
