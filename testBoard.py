@@ -320,81 +320,6 @@ async def inner_security_sequence(panel: int):
         stop_sound()
         raise
 
-async def launch_sequence():
-    try:
-        current_flags = State.STRATEGIC_ALERT
-
-        await asyncio.sleep(start_delay)
-        
-        # Go through launch sequence
-        current_flags |= State.ENABLED
-        for panel in range(len(PANELS)):
-            update_panel(panel, current_flags, "BELL")
-            set_panel(panel, current_flags)
-        play_bell_1s()
-        await rand_delay()
-        
-        current_flags |= State.LAUNCH_CMD
-        for panel in range(len(PANELS)):
-            update_panel(panel, current_flags, "BELL")
-            set_panel(panel, current_flags)
-        play_bell_1s()
-        await rand_delay()
-        
-        current_flags |= State.LAUNCH_PROC
-        for panel in range(len(PANELS)):
-            update_panel(panel, current_flags, "BELL")
-            set_panel(panel, current_flags)
-        play_bell_2s()
-        await rand_delay()
-        
-        current_flags |= State.INNER_SECURITY
-        for panel in range(len(PANELS)):
-            update_panel(panel, current_flags, "BUZZER")
-            set_panel(panel, current_flags)
-        play_buzzer_1s()
-        await rand_delay()
-
-        current_flags |= State.OUTER_SECURITY
-        for panel in range(len(PANELS)):
-            update_panel(panel, current_flags, "BUZZER")
-            set_panel(panel, current_flags)
-        play_buzzer_1s()
-        await rand_delay()
-        
-        current_flags |= State.MISSILE_AWAY
-        for panel in range(len(PANELS)):
-            update_panel(panel, current_flags, "LIFTOFF")
-            set_panel(panel, current_flags)
-        
-        # Switch to "after launch" state after 10 seconds
-        await asyncio.sleep(10.0)
-        current_flags = (State.NOT_AUTH | State.FAULT | State.WARHEAD_ALM | State.MISSILE_AWAY |
-                         State.OUTER_SECURITY | State.INNER_SECURITY)
-        for panel in range(len(PANELS)):
-            update_panel(panel, current_flags, "BUZZER")
-            set_panel(panel, current_flags)
-        play_buzzer_2s()
-
-        # Turn off buzzer after 2 seconds
-        await asyncio.sleep(2.0)
-        for panel in range(len(PANELS)):
-            update_panel(panel, current_flags, "") # Silence alarm
-
-        # Hold state for 5 seconds
-        await asyncio.sleep(3.0)
-        current_flags = State.STRATEGIC_ALERT
-        for panel in range(len(PANELS)):
-            update_panel(panel, current_flags, "") # Reset to home state
-            set_panel(panel, current_flags)
-
-    except asyncio.CancelledError:
-        # handle task cancellation
-        for panel in range(len(PANELS)):
-            update_panel(panel, State.STRATEGIC_ALERT, "")
-            set_panel(panel, current_flags)
-        stop_sound()
-        raise
 
 async def launch_sequence_per_panel(panel: int, start_delay: float):
     try:
@@ -507,34 +432,6 @@ async def schedule_task(panel, coro, is_launch=False):
         panel_tasks[panel] = task
         task.add_done_callback(lambda t: panel_tasks.pop(panel, None))
 
-#async def cancel_all():
-#    global launch_task
-#
-#    # Cancel launch
-#    if launch_task:
-#        launch_task.cancel()
-#        with contextlib.suppress(asyncio.CancelledError):
-#           await launch_task
-#        launch_task = None
-#
-#    tasks = list(panel_tasks.values())
-#
-#    # Cancel all panel tasks
-#    for task in tasks:
-#        task.cancel()
-#
-#    for task in tasks:
-#        with contextlib.suppress(asyncio.CancelledError):
-#            await task
-#
-#    panel_tasks.clear()
-
-async def ainput(prompt: str = ""):
-    with ThreadPoolExecutor(1, "AsyncInput") as executor:
-        return await asyncio.get_running_loop().run_in_executor(
-            executor, input, prompt
-        )
-
 async def evdev_listener(dev_path: str, cmd_q: asyncio.Queue):
     dev = InputDevice(dev_path)
 
@@ -550,16 +447,18 @@ async def evdev_listener(dev_path: str, cmd_q: asyncio.Queue):
 
 async def dispatch_cmd(cmd: str):
     cmd = cmd.strip()
-    await home()
     if cmd == "1":
+        await home()
         # Outer Security 
         panel = random.randint(0, 1)
         await schedule_task(panel, outer_security_sequence(panel))
     elif cmd == "2":
+        await home()
         # Inner Security
         panel = random.randint(0, 1)
         await schedule_task(panel, inner_security_sequence(panel))
     elif cmd == "3":
+        await home()
         # Launch Sequence
         for panel in range(len(PANELS)):
             delay = random.uniform(1.0, 4.0)
@@ -567,13 +466,16 @@ async def dispatch_cmd(cmd: str):
             panel_tasks[panel] = task
         #await schedule_task(0, launch_sequence(delay), is_launch=True)
     elif cmd == "4":
+        await home()
         # Not Authenticated
         panel = random.randint(0, 1)
         await schedule_task(panel, not_authenticated_sequence(panel))
     elif cmd == "5":
+        await home()
         # Lamp Test
         await schedule_task(0, lamp_test_sequence(), is_launch=True)
     elif cmd == "6":
+        await home()
         play_pas()
     elif cmd == "0":
         await home()
