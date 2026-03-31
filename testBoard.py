@@ -66,6 +66,11 @@ KEY_TO_CMD = {
     ecodes.KEY_VOLUMEDOWN: "-", # VOLUME DOWN
 }
 
+# ---------- DIRECTORIES -----------
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+SOUNDS_DIR = os.path.join(BASE_DIR, "..", "sounds")
+VOLUME_FILE = os.path.join(BASE_DIR, "volume.txt")
+
 # ---------- PINS -----------
 # BCM numbers
 MUX0 = OutputDevice(22) # physical 15
@@ -575,13 +580,9 @@ async def dispatch_cmd(cmd: str):
     elif cmd == "q":
         raise SystemExit
     elif cmd == "+":
-        m = alsaaudio.Mixer('Digital')
-        current_volume = m.getvolume()
-        m.setvolume(current_volume[0]+2)
+        change_volume(+2)
     elif cmd == "-":
-        m = alsaaudio.Mixer('Digital')
-        current_volume = m.getvolume()
-        m.setvolume(current_volume[0]-2)
+        change_volume(-2)
     
     show_panels("\n[1] Out [2] In [3] Launch [4] Not Auth [5] Lamp Test [0] Reset > ")
 
@@ -594,6 +595,44 @@ def initialize_display():
     time.sleep(10e-6)
 
     OE_ALL_U_L.off()
+
+MAX_VOLUME = 134
+MIN_VOLUME = 0
+DEFAULT_VOLUME = 62
+
+def initialize_audio():
+    vol = load_volume()
+    apply_volume(vol)
+    return vol
+
+def clamp_volume(vol: int) -> int:
+    return max(MIN_VOLUME, min(MAX_VOLUME, vol))
+
+def save_volume(volume: int):
+    volume = clamp_volume(volume)
+    with open(VOLUME_FILE, "w", encoding="utf-8") as f:
+        f.write(f"{volume}\n")
+
+def load_volume() -> int:
+    try:
+        with open(VOLUME_FILE, "r", encoding="utf-8") as f:
+            return clamp_volume(int(f.read().strip()))
+    except (FileNotFoundError, ValueError):
+        return DEFAULT_VOLUME  # Default volume
+
+def apply_volume(vol: int):
+    vol = clamp_volume(vol)
+    m = alsaaudio.Mixer('Digital')
+    m.setvolume(vol)
+
+def change_volume(delta: int) -> int:
+    m = alsaaudio.Mixer('Digital')
+    current_volume = m.getvolume()[0]
+    new_vol = clamp_volume(current_volume + delta)
+    m.setvolume(new_vol)
+    save_volume(new_vol)
+    
+    return new_vol
 
 audio_process = None
 
@@ -616,9 +655,7 @@ def play_sound(filename: str):
     global audio_process
 
     stop_sound()
-
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    sound_path = os.path.join(base_dir, "..", "sounds", filename)
+    sound_path = os.path.join(SOUNDS_DIR, filename)
 
     mute_audio()
     audio_process = subprocess.Popen(["aplay", sound_path])
@@ -696,6 +733,7 @@ def handle_button_press(loop, q, cmd):
 
 async def main():
     initialize_display()
+    initialize_audio()
 
     await home()
     
