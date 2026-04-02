@@ -53,13 +53,13 @@ STATE_TO_MASK = {
 }
 
 # ---------- KEYS -----------
-KEY_TO_CMD = { 
-    ecodes.KEY_1: "1", # OUTER 
-    ecodes.KEY_2: "2", # INNER
-    ecodes.KEY_3: "3", # LAUNCH
-    ecodes.KEY_4: "4", # NOT AUTH
-    ecodes.KEY_5: "5", # LAMP TEST
-    ecodes.KEY_6: "6", # PLAY AUDIO
+KEY_TO_CMD = {
+    ecodes.KEY_1: "1a", # OUTER (remote)
+    ecodes.KEY_2: "2a", # INNER (remote)
+    ecodes.KEY_3: "3a", # LAUNCH (remote)
+    ecodes.KEY_4: "4a", # NOT AUTH (remote)
+    ecodes.KEY_5: "5a", # LAMP TEST (remote)
+    ecodes.KEY_6: "6", # PLAY AUDIO (remote)
     ecodes.KEY_HOMEPAGE: "0", # HOME
     ecodes.KEY_BACKSPACE: "q", # QUIT
     ecodes.KEY_VOLUMEUP: "+", # VOLUME UP
@@ -447,36 +447,66 @@ async def evdev_listener(dev_path: str, cmd_q: asyncio.Queue):
 
 async def dispatch_cmd(cmd: str):
     cmd = cmd.strip()
-    if cmd == "1":
+
+    # Remote Input all 5 panels
+    if cmd == "1a":
         await home()
-        # Outer Security 
-        panel = random.randint(0, 1)
+        # Outer Security (remote)
+        panel = random.randint(0, len(PANELS) - 1)
         await schedule_task(panel, outer_security_sequence(panel))
-    elif cmd == "2":
+    elif cmd == "2a":
         await home()
-        # Inner Security
-        panel = random.randint(0, 1)
+        # Inner Security (remote)
+        panel = random.randint(0, len(PANELS) - 1)
         await schedule_task(panel, inner_security_sequence(panel))
-    elif cmd == "3":
+    elif cmd == "3a":
         await home()
-        # Launch Sequence
+        # Launch Sequence (remote)
         for panel in range(len(PANELS)):
             delay = random.uniform(1.0, 4.0)
             task = asyncio.create_task(launch_sequence_per_panel(panel, delay))
             panel_tasks[panel] = task
-        #await schedule_task(0, launch_sequence(delay), is_launch=True)
-    elif cmd == "4":
+    elif cmd == "4a":
         await home()
-        # Not Authenticated
-        panel = random.randint(0, 1)
+        # Not Authenticated (remote)
+        panel = random.randint(0, len(PANELS) - 1)
         await schedule_task(panel, not_authenticated_sequence(panel))
-    elif cmd == "5":
+    elif cmd == "5a":
         await home()
-        # Lamp Test
+        # Lamp Test (remote)
         await schedule_task(0, lamp_test_sequence(), is_launch=True)
-    elif cmd == "6":
+    elif cmd == "6a":
         await home()
         play_pas()
+
+    # Button Input (b) panels 1 & 2 only
+    elif cmd == "1b":
+        await home()
+        # Outer Security (button)
+        panel = random.randint(0, 1)
+        await schedule_task(panel, outer_security_sequence(panel))
+    elif cmd == "2b":
+        await home()
+        # Inner Security (button)
+        panel = random.randint(0, 1)
+        await schedule_task(panel, inner_security_sequence(panel))
+    elif cmd == "3b":
+        await home()
+        # Launch Sequence (button)
+        for panel in range(len(PANELS)):
+            delay = random.uniform(1.0, 4.0)
+            task = asyncio.create_task(launch_sequence_per_panel(panel, delay))
+            panel_tasks[panel] = task
+    elif cmd == "4b":
+        await home()
+        # Not Authenticated (button)
+        panel = random.randint(0, 1)
+        await schedule_task(panel, not_authenticated_sequence(panel))
+    elif cmd == "5b":
+        await home()
+        # Lamp Test (button)
+        await schedule_task(0, lamp_test_sequence(), is_launch=True)
+        
     elif cmd == "0":
         await home()
     elif cmd == "q":
@@ -644,11 +674,11 @@ async def main():
     dev_path = "/dev/input/event0"
 
     main_loop = asyncio.get_running_loop()
-    BTN0.when_pressed = lambda: handle_button_press(main_loop, cmd_q, "1")
-    BTN1.when_pressed = lambda: handle_button_press(main_loop, cmd_q, "2")
-    BTN2.when_pressed = lambda: handle_button_press(main_loop, cmd_q, "3")
-    BTN3.when_pressed = lambda: handle_button_press(main_loop, cmd_q, "4")
-    BTN4.when_pressed = lambda: handle_button_press(main_loop, cmd_q, "5")
+    BTN0.when_pressed = lambda: handle_button_press(main_loop, cmd_q, "1b")
+    BTN1.when_pressed = lambda: handle_button_press(main_loop, cmd_q, "2b")
+    BTN2.when_pressed = lambda: handle_button_press(main_loop, cmd_q, "3b")
+    BTN3.when_pressed = lambda: handle_button_press(main_loop, cmd_q, "4b")
+    BTN4.when_pressed = lambda: handle_button_press(main_loop, cmd_q, "5b")
 
     #try:
      #   devices = [InputDevice(path) for path in evdev.list_devices()]
