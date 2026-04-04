@@ -13,6 +13,7 @@ import subprocess
 from smbus2 import SMBus
 import alsaaudio
 import os
+import pygame
 
 # ---------- STATES ----------
 
@@ -59,7 +60,7 @@ KEY_TO_CMD = {
     ecodes.KEY_3: "3a", # LAUNCH (remote)
     ecodes.KEY_4: "4a", # NOT AUTH (remote)
     ecodes.KEY_5: "5a", # LAMP TEST (remote)
-    ecodes.KEY_6: "6", # PLAY AUDIO (remote)
+    ecodes.KEY_6: "6a", # PLAY AUDIO (remote)
     ecodes.KEY_HOMEPAGE: "0", # HOME
     ecodes.KEY_BACKSPACE: "q", # QUIT
     ecodes.KEY_VOLUMEUP: "+", # VOLUME UP
@@ -94,17 +95,6 @@ spi.open(0,0)
 spi.max_speed_hz = 1_000_000
 spi.mode = 3
 
-# ---------- I2C SETUP ----------
-AMP_I2C_BUS = 1
-AMP_I2C_ADDR = 0x4D
-
-AMP4_INIT_WRITES = [
-        (0x35, 0x58), # standard i2s
-        (0x36, 0x53), # enable limiter + default i2s sck polarity
-
-        (0x1D, 0x02), # power mode profile
-    ]
-
 # ---------- VISUAL LAYOUT ----------
 
 VISUAL_SLOTS = [
@@ -131,6 +121,24 @@ panel_state = {i: State.STRATEGIC_ALERT for i in range(len(PANELS))}
 panel_alarms = {i: "" for i in range(len(PANELS))}
 panel_tasks = {}
 launch_task = None
+
+
+# ---------- AUDIO SETUP ----------
+MAX_VOLUME = 90
+MIN_VOLUME = 0
+DEFAULT_VOLUME = 30
+
+# Pygame sound objects
+bell_1s_sound = None
+bell_2s_sound = None
+buzzer_1s_sound = None
+buzzer_2s_sound = None
+pas_sound = None
+
+# Mixer channels
+BELL_CHANNEL = None
+BUZZER_CHANNEL = None
+PAS_CHANNEL = None
 
 # ---------- DISPLAY ENGINE ----------
 
@@ -244,7 +252,7 @@ async def not_authenticated_sequence(panel: int):
     except asyncio.CancelledError:
         update_panel(panel, State.STRATEGIC_ALERT, "")
         set_panel(panel, State.STRATEGIC_ALERT)
-        stop_sound()
+        stop_all_sounds()
         raise
 
 async def lamp_test_sequence():
@@ -277,7 +285,7 @@ async def outer_security_sequence(panel: int):
         base = State.STRATEGIC_ALERT
         update_panel(panel, base | State.OUTER_SECURITY, "BUZZER")
         set_panel(panel, base | State.OUTER_SECURITY)
-        play_buzzer_1s()
+        play_buzzer_2s()
 
         # Turn off buzzer after 2 seconds
         await asyncio.sleep(2.0)
@@ -293,7 +301,7 @@ async def outer_security_sequence(panel: int):
         # handle task cancellation
         update_panel(panel, State.STRATEGIC_ALERT, "")
         set_panel(panel, State.STRATEGIC_ALERT)
-        stop_sound()
+        stop_all_sounds()
         raise
 
 async def inner_security_sequence(panel: int):
@@ -302,7 +310,7 @@ async def inner_security_sequence(panel: int):
         base = State.STRATEGIC_ALERT
         update_panel(panel, base | State.INNER_SECURITY, "BUZZER")
         set_panel(panel, base | State.INNER_SECURITY)
-        play_buzzer_1s()
+        play_buzzer_2s()
 
         # Turn off buzzer after 2 seconds
         await asyncio.sleep(2.0)
@@ -317,15 +325,15 @@ async def inner_security_sequence(panel: int):
         # handle task cancellation
         update_panel(panel, State.STRATEGIC_ALERT, "")
         set_panel(panel, State.STRATEGIC_ALERT)
-        stop_sound()
+        stop_all_sounds()
         raise
 
 
-async def launch_sequence_per_panel(panel: int, start_delay: float):
+async def launch_sequence_per_panel(panel: int):
     try:
         current_flags = State.STRATEGIC_ALERT
 
-        await asyncio.sleep(start_delay)
+        await rand_delay() # random delay before starting sequence
 
         # Go through launch sequence
         current_flags |= State.ENABLED
@@ -383,14 +391,14 @@ async def launch_sequence_per_panel(panel: int, start_delay: float):
     except asyncio.CancelledError:
         # handle task cancellation
         update_panel(panel, State.STRATEGIC_ALERT, "")
-        set_panel(panel, current_flags)
-        stop_sound()
+        set_panel(panel, State.STRATEGIC_ALERT)
+        stop_all_sounds()
         raise
 
 # ---------- HELPERS ----------
 
 async def rand_delay():
-    await asyncio.sleep(random.uniform(1.0, 4.0))
+    await asyncio.sleep(random.uniform(4.0, 8.0))
 
 async def schedule_task(panel, coro, is_launch=False):
     global launch_task
@@ -461,10 +469,11 @@ async def dispatch_cmd(cmd: str):
         await schedule_task(panel, inner_security_sequence(panel))
     elif cmd == "3a":
         await home()
+        play_pas()
+
         # Launch Sequence (remote)
         for panel in range(len(PANELS)):
-            delay = random.uniform(1.0, 4.0)
-            task = asyncio.create_task(launch_sequence_per_panel(panel, delay))
+            task = asyncio.create_task(launch_sequence_per_panel(panel))
             panel_tasks[panel] = task
     elif cmd == "4a":
         await home()
@@ -492,10 +501,11 @@ async def dispatch_cmd(cmd: str):
         await schedule_task(panel, inner_security_sequence(panel))
     elif cmd == "3b":
         await home()
+        play_pas()
+
         # Launch Sequence (button)
-        for panel in range(len(PANELS)):
-            delay = random.uniform(1.0, 4.0)
-            task = asyncio.create_task(launch_sequence_per_panel(panel, delay))
+        for panel in range(2):
+            task = asyncio.create_task(launch_sequence_per_panel(panel))
             panel_tasks[panel] = task
     elif cmd == "4b":
         await home()
@@ -528,13 +538,32 @@ def initialize_display():
 
     OE_ALL_U_L.off()
 
-MAX_VOLUME = 90
-MIN_VOLUME = 0
-DEFAULT_VOLUME = 30
-
 def initialize_audio():
+    global bell_1s_sound, bell_2s_sound, buzzer_1s_sound, buzzer_2s_sound, pas_sound
+
+    # Start pygame mixer
+    pygame.mixer.init(frequency=44100, size=-16, channels=2, buffer=1024)
+
+    # Give ourselves several channels so sounds can overlap
+    pygame.mixer.set_num_channels(16)
+
+    global BELL_CHANNEL, BUZZER_CHANNEL, PAS_CHANNEL
+
+    BELL_CHANNEL = pygame.mixer.Channel(0)
+    BUZZER_CHANNEL = pygame.mixer.Channel(1)
+    PAS_CHANNEL = pygame.mixer.Channel(2)
+
+    # Load clips once at startup
+    bell_1s_sound = pygame.mixer.Sound(os.path.join(SOUNDS_DIR, "bell_1s2.wav"))
+    bell_2s_sound = pygame.mixer.Sound(os.path.join(SOUNDS_DIR, "bell_2s.wav"))
+    buzzer_1s_sound = pygame.mixer.Sound(os.path.join(SOUNDS_DIR, "buzzer_1s.wav"))
+    buzzer_2s_sound = pygame.mixer.Sound(os.path.join(SOUNDS_DIR, "buzzer_2s.wav"))
+    pas_sound = pygame.mixer.Sound(os.path.join(SOUNDS_DIR, "pas_3s.wav"))
+
+    # Apply saved volume
     vol = load_volume()
     apply_volume(vol)
+
     return vol
 
 def clamp_volume(vol: int) -> int:
@@ -553,72 +582,70 @@ def load_volume() -> int:
         return DEFAULT_VOLUME  # Default volume
 
 def apply_volume(vol: int):
+    # Apply volume to ALSA mixer and pygame sounds
     vol = clamp_volume(vol)
+
+    # Keep your hardware/ALSA volume
     m = alsaaudio.Mixer('Digital')
     m.setvolume(vol)
 
+    # pygame volume uses 0.0 to 1.0, so convert from 0-90.
+    pygame_vol = vol / MAX_VOLUME if MAX_VOLUME > 0 else 0.0
+
+    sounds = [bell_1s_sound, bell_2s_sound, buzzer_1s_sound, buzzer_2s_sound, pas_sound]
+    for snd in sounds:
+        if snd is not None:
+            snd.set_volume(pygame_vol)
+
 def change_volume(delta: int) -> int:
-    m = alsaaudio.Mixer('Digital')
-    current_volume = m.getvolume()[0]
+    current_volume = load_volume()
     new_vol = clamp_volume(current_volume + delta)
-    m.setvolume(new_vol)
     save_volume(new_vol)
-    
+    apply_volume(new_vol)
     return new_vol
 
-audio_process = None
-
-def stop_sound():
-    global audio_process
-
-    # Stop current sound if playing
-    if audio_process and audio_process.poll() is None:
-        mute_audio()
-        #time.sleep(0.02)
-        audio_process.terminate()
-        try:
-            audio_process.wait(timeout=0.001)
-        except subprocess.TimeoutExpired:
-            audio_process.kill()
-            audio_process.wait()
-    audio_process = None
-
-def play_sound(filename: str):
-    global audio_process
-
-    stop_sound()
-    sound_path = os.path.join(SOUNDS_DIR, filename)
-
+def stop_all_sounds():
+    # Stop every active mixer channel
+    pygame.mixer.stop()
     mute_audio()
-    audio_process = subprocess.Popen(["aplay", sound_path])
-    time.sleep(0.02) # let amp settle
+
+def unmute_for_playback():
+    # Unmute before playback begins
     unmute_audio()
 
+def play_on_channel(channel, sound_obj):
+    # Restart the sound on its dedicated channel
+    if sound_obj is None or channel is None:
+        return None
+
+    unmute_for_playback()
+
+    # Restart the sound if already playing on this channel
+    channel.stop()
+    channel.play(sound_obj)
+
+    return channel
+
 def play_bell_1s():
-    play_sound("bell_1s2.wav")
+    return play_on_channel(BELL_CHANNEL, bell_1s_sound)
 
 def play_bell_2s():
-    play_sound("bell_2s.wav")
+    return play_on_channel(BELL_CHANNEL, bell_2s_sound)
 
 def play_buzzer_1s():
-    play_sound("buzzer_1s.wav")
+    return play_on_channel(BUZZER_CHANNEL, buzzer_1s_sound)
 
 def play_buzzer_2s():
-    play_sound("buzzer_2s.wav")
+    return play_on_channel(BUZZER_CHANNEL, buzzer_2s_sound)
 
 def play_pas():
-    play_sound("pas_3s.wav")
+    return play_on_channel(PAS_CHANNEL, pas_sound)
 
 def mute_audio():
     AUDIO_MUTE.on()
 
 def unmute_audio():
     AUDIO_MUTE.off()
-
-    #with SMBus(AMP_I2C_BUS) as bus:
-    #    for reg, val in AMP4_INIT_WRITES:
-    #        bus.write_byte_data(AMP_I2C_ADDR, reg & 0xFF, val & 0xFF)
-    #        time.sleep(delay_s)
 
 
 def select_panel(n: int):
@@ -680,12 +707,6 @@ async def main():
     BTN3.when_pressed = lambda: handle_button_press(main_loop, cmd_q, "4b")
     BTN4.when_pressed = lambda: handle_button_press(main_loop, cmd_q, "5b")
 
-    #try:
-     #   devices = [InputDevice(path) for path in evdev.list_devices()]
-      #  dev_path = devices[0].path if devices else "/dev/input/event0"
-    #except OSError:
-     #   dev_path = "/dev/input/event0"
-
     listener_task = asyncio.create_task(evdev_listener(dev_path, cmd_q))
 
     # run loop + clean shutdown
@@ -701,6 +722,9 @@ async def main():
         listener_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await listener_task
+
+        stop_all_sounds()
+        pygame.mixer.quit()
         
         show_panels("\n[1] Out [2] In [3] Launch [4] Not Auth [5] Lamp Test [0] Reset > ")
 
