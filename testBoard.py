@@ -120,8 +120,6 @@ PANELS = ["A-LEFT", "A-RIGHT", "B-LEFT", "B-RIGHT", "C-LEFT", "C-RIGHT", "D-LEFT
 panel_state = {i: State.STRATEGIC_ALERT for i in range(len(PANELS))}
 panel_alarms = {i: "" for i in range(len(PANELS))}
 panel_tasks = {}
-launch_task = None
-
 
 # ---------- AUDIO SETUP ----------
 MAX_VOLUME = 90
@@ -197,34 +195,24 @@ def update_panel(panel: int, state: State, alarm_text: str = ""):
     panel_alarms[panel] = alarm_text
     show_panels("\n[1] Out [2] In [3] Launch [4] Not Auth [5] Lamp Test [0] Reset > ")
 
-# ---------- SEQUENCES FROM LEFT IMAGE ----------
+# ---------- FUNCTIONS ----------
 
 async def home():
-    global launch_task
-    
-    # Cancel launch task if running
-    if launch_task:
-        launch_task.cancel()
-        try:
-            await asyncio.sleep(0.1)
-        except asyncio.CancelledError:
-            pass
-        launch_task = None
-
-    # Cancel all panel specific tasks
-    for task in list(panel_tasks.values()):
-        task.cancel()
-    await asyncio.sleep(0.1)
+    # Cancel all panel tasks and wait for them
+    tasks = list(panel_tasks.values())
     panel_tasks.clear()
+    await cancel_all_tasks(tasks)
+
+    # Stop audio after all task cleanup has finished
+    stop_all_sounds()
 
     # Reset all panels to default state
     for i in range(len(PANELS)):
         panel_state[i] = State.STRATEGIC_ALERT
-        set_panel(i, State.STRATEGIC_ALERT)
         panel_alarms[i] = ""
-    
-    show_panels("\n[1] Out [2] In [3] Launch [4] Not Auth [5] Lamp Test [0] Reset > ")
+        set_panel(i, State.STRATEGIC_ALERT)
 
+    show_panels("\n[1] Out [2] In [3] Launch [4] Not Auth [5] Lamp Test [0] Reset > ")
 
 async def not_authenticated_sequence(panel: int):
     try:
@@ -265,6 +253,7 @@ async def lamp_test_sequence():
             
         # Apply to all panels immediately
         for panel in range(len(PANELS)):
+            update_panel(panel, all_on)
             set_panel(panel, all_on)
 
             
@@ -396,138 +385,6 @@ async def launch_sequence_per_panel(panel: int):
         raise
 
 # ---------- HELPERS ----------
-
-async def rand_delay():
-    await asyncio.sleep(random.uniform(4.0, 8.0))
-
-async def schedule_task(panel, coro, is_launch=False):
-    global launch_task
-
-    if is_launch:
-        # Cancel launch if already running
-        if launch_task:
-            launch_task.cancel()
-            try:
-                await asyncio.sleep(0.1)
-            except asyncio.CancelledError:
-                pass
-        # Cancel all panel tasks while launch starts
-        for task in list(panel_tasks.values()):
-            task.cancel()
-        await asyncio.sleep(0.1)
-        panel_tasks.clear()
-
-        # Start launch and store globally
-        for panel in range(len(PANELS)):
-            launch_task = asyncio.create_task(coro)
-            launch_task.add_done_callback(lambda t: globals().__setitem__('launch_task', None))
-
-    else:
-        # Cancel only the task on this panel
-        if panel in panel_tasks:
-            panel_tasks[panel].cancel()
-            await asyncio.sleep(0.1)
-            #panel_tasks.pop(panel)
-
-        # If launch is running, cancel it
-        if launch_task:
-            launch_task.cancel()
-            await asyncio.sleep(0.1)
-            launch_task = None
-
-        # Start the new panel task
-        task = asyncio.create_task(coro)
-        panel_tasks[panel] = task
-        task.add_done_callback(lambda t: panel_tasks.pop(panel, None))
-
-async def evdev_listener(dev_path: str, cmd_q: asyncio.Queue):
-    dev = InputDevice(dev_path)
-
-    try:
-        dev.grab()
-    except OSError:
-        pass
-
-    async for event in dev.async_read_loop():
-        if event.type == ecodes.EV_KEY:
-            if event.value == 1 and event.code in KEY_TO_CMD:
-                await cmd_q.put(KEY_TO_CMD[event.code])
-
-async def dispatch_cmd(cmd: str):
-    cmd = cmd.strip()
-
-    # Remote Input all 5 panels
-    if cmd == "1a":
-        await home()
-        # Outer Security (remote)
-        panel = random.randint(0, len(PANELS) - 1)
-        await schedule_task(panel, outer_security_sequence(panel))
-    elif cmd == "2a":
-        await home()
-        # Inner Security (remote)
-        panel = random.randint(0, len(PANELS) - 1)
-        await schedule_task(panel, inner_security_sequence(panel))
-    elif cmd == "3a":
-        await home()
-        play_pas()
-
-        # Launch Sequence (remote)
-        for panel in range(len(PANELS)):
-            task = asyncio.create_task(launch_sequence_per_panel(panel))
-            panel_tasks[panel] = task
-    elif cmd == "4a":
-        await home()
-        # Not Authenticated (remote)
-        panel = random.randint(0, len(PANELS) - 1)
-        await schedule_task(panel, not_authenticated_sequence(panel))
-    elif cmd == "5a":
-        await home()
-        # Lamp Test (remote)
-        await schedule_task(0, lamp_test_sequence(), is_launch=True)
-    elif cmd == "6a":
-        await home()
-        play_pas()
-
-    # Button Input (b) panels 1 & 2 only
-    elif cmd == "1b":
-        await home()
-        # Outer Security (button)
-        panel = random.randint(0, 1)
-        await schedule_task(panel, outer_security_sequence(panel))
-    elif cmd == "2b":
-        await home()
-        # Inner Security (button)
-        panel = random.randint(0, 1)
-        await schedule_task(panel, inner_security_sequence(panel))
-    elif cmd == "3b":
-        await home()
-        play_pas()
-
-        # Launch Sequence (button)
-        for panel in range(2):
-            task = asyncio.create_task(launch_sequence_per_panel(panel))
-            panel_tasks[panel] = task
-    elif cmd == "4b":
-        await home()
-        # Not Authenticated (button)
-        panel = random.randint(0, 1)
-        await schedule_task(panel, not_authenticated_sequence(panel))
-    elif cmd == "5b":
-        await home()
-        # Lamp Test (button)
-        await schedule_task(0, lamp_test_sequence(), is_launch=True)
-        
-    elif cmd == "0":
-        await home()
-    elif cmd == "q":
-        raise SystemExit
-    elif cmd == "+":
-        change_volume(+2)
-    elif cmd == "-":
-        change_volume(-2)
-    
-    show_panels("\n[1] Out [2] In [3] Launch [4] Not Auth [5] Lamp Test [0] Reset > ")
-
 
 def initialize_display():
     OE_ALL_U_L.on() # disable
@@ -684,9 +541,133 @@ def set_panel(panel: int, flags: State):
     panel_state[panel] = flags
     write_panel(panel, flags)
 
-
 def handle_button_press(loop, q, cmd):
     loop.call_soon_threadsafe(q.put_nowait, cmd)
+
+async def rand_delay():
+    await asyncio.sleep(random.uniform(4.0, 8.0))
+
+async def schedule_task(panel, coro):
+    # Cancel existing task for this panel if it exists
+    if panel in panel_tasks:
+        old_task = panel_tasks.pop(panel)
+        await cancel_and_wait(old_task)
+
+    # Start the new panel task
+    task = asyncio.create_task(coro)
+    panel_tasks[panel] = task
+    task.add_done_callback(lambda t: panel_tasks.pop(panel, None))
+
+async def cancel_and_wait(task: asyncio.Task | None):
+    # Cancel one task and wait for it to fully finish cleanup
+    if task is None:
+        return
+
+    if not task.done():
+        task.cancel()
+
+    with contextlib.suppress(asyncio.CancelledError):
+        await task
+
+
+async def cancel_all_tasks(tasks):
+    # Cancel a list of tasks and wait for all of them to finish
+    task_list = [t for t in tasks if t is not None and not t.done()]
+
+    for task in task_list:
+        task.cancel()
+
+    for task in task_list:
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+async def evdev_listener(dev_path: str, cmd_q: asyncio.Queue):
+    dev = InputDevice(dev_path)
+
+    try:
+        dev.grab()
+    except OSError:
+        pass
+
+    async for event in dev.async_read_loop():
+        if event.type == ecodes.EV_KEY:
+            if event.value == 1 and event.code in KEY_TO_CMD:
+                await cmd_q.put(KEY_TO_CMD[event.code])
+
+async def dispatch_cmd(cmd: str):
+    cmd = cmd.strip()
+
+    # Remote Input all 5 panels
+    if cmd == "1a":
+        await home()
+        # Outer Security (remote)
+        panel = random.randint(0, len(PANELS) - 1)
+        await schedule_task(panel, outer_security_sequence(panel))
+    elif cmd == "2a":
+        await home()
+        # Inner Security (remote)
+        panel = random.randint(0, len(PANELS) - 1)
+        await schedule_task(panel, inner_security_sequence(panel))
+    elif cmd == "3a":
+        await home()
+        play_pas()
+
+        # Launch Sequence (remote)
+        for panel in range(len(PANELS)):
+            task = asyncio.create_task(launch_sequence_per_panel(panel))
+            panel_tasks[panel] = task
+    elif cmd == "4a":
+        await home()
+        # Not Authenticated (remote)
+        panel = random.randint(0, len(PANELS) - 1)
+        await schedule_task(panel, not_authenticated_sequence(panel))
+    elif cmd == "5a":
+        await home()
+        # Lamp Test (remote)
+        await schedule_task(0, lamp_test_sequence())
+    elif cmd == "6a":
+        await home()
+        play_pas()
+
+    # Button Input (b) panels 1 & 2 only
+    elif cmd == "1b":
+        await home()
+        # Outer Security (button)
+        panel = random.randint(0, 1)
+        await schedule_task(panel, outer_security_sequence(panel))
+    elif cmd == "2b":
+        await home()
+        # Inner Security (button)
+        panel = random.randint(0, 1)
+        await schedule_task(panel, inner_security_sequence(panel))
+    elif cmd == "3b":
+        await home()
+        play_pas()
+
+        # Launch Sequence (button)
+        for panel in range(2):
+            task = asyncio.create_task(launch_sequence_per_panel(panel))
+            panel_tasks[panel] = task
+    elif cmd == "4b":
+        await home()
+        # Not Authenticated (button)
+        panel = random.randint(0, 1)
+        await schedule_task(panel, not_authenticated_sequence(panel))
+    elif cmd == "5b":
+        await home()
+        # Lamp Test (button)
+        await schedule_task(0, lamp_test_sequence())
+        
+    elif cmd == "0":
+        await home()
+    elif cmd == "q":
+        raise SystemExit
+    elif cmd == "+":
+        change_volume(+2)
+    elif cmd == "-":
+        change_volume(-2)
+    
+    show_panels("\n[1] Out [2] In [3] Launch [4] Not Auth [5] Lamp Test [0] Reset > ")
 
 # ---------- MAIN ----------
 
