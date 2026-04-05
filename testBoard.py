@@ -57,11 +57,13 @@ STATE_TO_MASK = {
 KEY_TO_CMD = {
     ecodes.KEY_1: "1a", # OUTER (remote)
     ecodes.KEY_2: "2a", # INNER (remote)
-    ecodes.KEY_3: "3a", # LAUNCH (remote)
+    ecodes.KEY_3: "3a", # AUTO LAUNCH (remote)
     ecodes.KEY_4: "4a", # NOT AUTH (remote)
     ecodes.KEY_5: "5a", # LAMP TEST (remote)
     ecodes.KEY_6: "6a", # PLAY AUDIO (remote)
-    ecodes.KEY_HOMEPAGE: "0", # HOME
+    ecodes.KEY_7: "7a", # STEP LAUNCH (remote)
+    ecodes.KEY_NEXTSONG : "step", # LAUNCH SEQUENCE STEP (remote)
+    ecodes.KEY_HOMEPAGE: "home", # HOME
     ecodes.KEY_BACKSPACE: "q", # QUIT
     ecodes.KEY_VOLUMEUP: "+", # VOLUME UP
     ecodes.KEY_VOLUMEDOWN: "-", # VOLUME DOWN
@@ -198,6 +200,9 @@ def update_panel(panel: int, state: State, alarm_text: str = ""):
 # ---------- FUNCTIONS ----------
 
 async def home():
+    global launch_controller
+    launch_controller = None
+
     # Cancel all panel tasks and wait for them
     tasks = list(panel_tasks.values())
     panel_tasks.clear()
@@ -255,17 +260,20 @@ async def lamp_test_sequence():
         for panel in range(len(PANELS)):
             update_panel(panel, all_on)
             set_panel(panel, all_on)
-
             
         # Hold for 3 seconds
         await asyncio.sleep(3.0)
-        
-        # Return to home
-        await home()
+
+        # Clear all panels back to home state
+        for panel in range(len(PANELS)):
+            update_panel(panel, State.STRATEGIC_ALERT, "")
+            set_panel(panel, State.STRATEGIC_ALERT)
         
     except asyncio.CancelledError:
-        # If interrupted, just let it go (home() handles cleanup)
-        pass
+        for panel in range(len(PANELS)):
+            update_panel(panel, State.STRATEGIC_ALERT, "")
+            set_panel(panel, State.STRATEGIC_ALERT)
+        raise
 
 
 async def outer_security_sequence(panel: int):
@@ -384,12 +392,150 @@ async def launch_sequence_per_panel(panel: int):
         stop_all_sounds()
         raise
 
+launch_controller = None
+
+class LeadPauseController:
+    def __init__(self, leader_panel=0):
+        self.leader_panel = leader_panel
+        self.pause_requested = False
+        self.resume_event = asyncio.Event()
+        self.resume_event.set()   # initially running
+        self.checkpoint_stage = 0
+
+    def request_pause(self, stage: int):
+        self.pause_requested = True
+        self.checkpoint_stage = stage
+        self.resume_event.clear()
+
+    def resume(self):
+        self.pause_requested = False
+        self.resume_event.set()
+
+async def follower_pause_point(panel: int):
+    global launch_controller
+
+    if launch_controller is None:
+        return
+
+    if panel == launch_controller.leader_panel:
+        return
+
+    if launch_controller.pause_requested:
+        await launch_controller.resume_event.wait()
+
+async def leader_checkpoint(panel: int, stage: int):
+    global launch_controller
+
+    if launch_controller is None:
+        return
+
+    if panel == launch_controller.leader_panel:
+        launch_controller.request_pause(stage)
+        await launch_controller.resume_event.wait()
+
+async def launch_sequence_step_through(panel: int):
+    try:
+        current_flags = State.STRATEGIC_ALERT
+
+        await step_delay(panel)
+
+        current_flags |= State.ENABLED
+        update_panel(panel, current_flags, "BELL")
+        set_panel(panel, current_flags)
+        if(panel == 0):
+            play_bell_2s()
+
+        await leader_checkpoint(panel, 1)
+        await follower_pause_point(panel)
+
+        await step_delay(panel)
+
+        current_flags |= State.LAUNCH_CMD
+        update_panel(panel, current_flags, "BELL")
+        set_panel(panel, current_flags)
+        if(panel == 0):
+            play_bell_2s()
+
+        await leader_checkpoint(panel, 2)
+        await follower_pause_point(panel)
+
+        await step_delay(panel)
+
+        current_flags |= State.LAUNCH_PROC
+        update_panel(panel, current_flags, "BELL")
+        set_panel(panel, current_flags)
+        if(panel == 0):
+            play_bell_2s()
+
+        await leader_checkpoint(panel, 3)
+        await follower_pause_point(panel)
+
+        await step_delay(panel)
+
+        current_flags |= State.INNER_SECURITY
+        update_panel(panel, current_flags, "BUZZER")
+        set_panel(panel, current_flags)
+        if(panel == 0):
+            play_buzzer_2s()
+
+        await leader_checkpoint(panel, 4)
+        await follower_pause_point(panel)
+
+        await step_delay(panel)
+
+        current_flags |= State.OUTER_SECURITY
+        update_panel(panel, current_flags, "BUZZER")
+        set_panel(panel, current_flags)
+        if(panel == 0):
+            play_buzzer_2s()
+
+        await leader_checkpoint(panel, 5)
+        await follower_pause_point(panel)
+
+        await step_delay(panel)
+
+        current_flags |= State.MISSILE_AWAY
+        update_panel(panel, current_flags, "LIFTOFF")
+        set_panel(panel, current_flags)
+
+        await leader_checkpoint(panel, 6)
+        await follower_pause_point(panel)
+
+        current_flags = (
+            State.NOT_AUTH | State.FAULT | State.WARHEAD_ALM |
+            State.MISSILE_AWAY | State.OUTER_SECURITY | State.INNER_SECURITY
+        )
+        update_panel(panel, current_flags, "BUZZER")
+        set_panel(panel, current_flags)
+        if(panel == 0):
+            play_buzzer_2s()
+
+        await leader_checkpoint(panel, 7)
+        await follower_pause_point(panel)
+
+        await step_delay(panel)
+
+        update_panel(panel, current_flags, "")
+
+        await asyncio.sleep(3.0)
+        current_flags = State.STRATEGIC_ALERT
+        update_panel(panel, current_flags, "")
+        set_panel(panel, current_flags)
+
+    except asyncio.CancelledError:
+        update_panel(panel, State.STRATEGIC_ALERT, "")
+        set_panel(panel, State.STRATEGIC_ALERT)
+        raise
+
+
 # ---------- HELPERS ----------
 
 def initialize_display():
     OE_ALL_U_L.on() # disable
 
     # add function to drive all LEDs to off
+    update_panel(0, State.STRATEGIC_ALERT, "")
+    set_panel(0, State.STRATEGIC_ALERT)
 
     time.sleep(10e-6)
 
@@ -461,8 +607,16 @@ def change_volume(delta: int) -> int:
     apply_volume(new_vol)
     return new_vol
 
+def mixer_ready() -> bool:
+    try:
+        return pygame.mixer.get_init() is not None
+    except Exception:
+        return False
+
 def stop_all_sounds():
     # Stop every active mixer channel
+    if not mixer_ready():
+        return
     pygame.mixer.stop()
     mute_audio()
 
@@ -471,6 +625,9 @@ def unmute_for_playback():
     unmute_audio()
 
 def play_on_channel(channel, sound_obj):
+    if not mixer_ready():
+        return None
+    
     # Restart the sound on its dedicated channel
     if sound_obj is None or channel is None:
         return None
@@ -503,7 +660,6 @@ def mute_audio():
 
 def unmute_audio():
     AUDIO_MUTE.off()
-
 
 def select_panel(n: int):
     MUX3.value = (n >> 3) & 1
@@ -547,16 +703,38 @@ def handle_button_press(loop, q, cmd):
 async def rand_delay():
     await asyncio.sleep(random.uniform(4.0, 8.0))
 
+async def step_delay(panel: int, min_s=4.0, max_s=8.0):
+    global launch_controller
+
+    remaining = random.uniform(min_s, max_s)
+    tick = 0.1
+
+    while remaining > 0:
+        if launch_controller is not None and launch_controller.pause_requested:
+            await launch_controller.resume_event.wait()
+
+        sleep_time = min(tick, remaining)
+        await asyncio.sleep(sleep_time)
+        remaining -= sleep_time
+
+def start_panel_task(panel, coro):
+    task = asyncio.create_task(coro)
+    panel_tasks[panel] = task
+    task.add_done_callback(lambda t, p=panel: panel_tasks.pop(p, None))
+    return task
+
 async def schedule_task(panel, coro):
     # Cancel existing task for this panel if it exists
     if panel in panel_tasks:
         old_task = panel_tasks.pop(panel)
         await cancel_and_wait(old_task)
+    
+    start_panel_task(panel, coro)
 
-    # Start the new panel task
-    task = asyncio.create_task(coro)
-    panel_tasks[panel] = task
-    task.add_done_callback(lambda t: panel_tasks.pop(panel, None))
+    # # Start the new panel task
+    # task = asyncio.create_task(coro)
+    # panel_tasks[panel] = task
+    # task.add_done_callback(lambda t, p=panel: panel_tasks.pop(p, None))
 
 async def cancel_and_wait(task: asyncio.Task | None):
     # Cancel one task and wait for it to fully finish cleanup
@@ -569,17 +747,35 @@ async def cancel_and_wait(task: asyncio.Task | None):
     with contextlib.suppress(asyncio.CancelledError):
         await task
 
-
 async def cancel_all_tasks(tasks):
-    # Cancel a list of tasks and wait for all of them to finish
-    task_list = [t for t in tasks if t is not None and not t.done()]
+    # The task currently running this function
+    current = asyncio.current_task()
 
-    for task in task_list:
-        task.cancel()
+    tasks_to_wait_for = []
 
-    for task in task_list:
-        with contextlib.suppress(asyncio.CancelledError):
-            await task
+    for task in tasks:
+        # Skip missing tasks and skip the current task so we never
+        # cancel/await ourselves during cleanup
+        if task is None or task is current:
+            continue
+
+        # Cancel tasks that are still running
+        if not task.done():
+            task.cancel()
+
+        # Still wait on done tasks too, so exceptions get collected
+        tasks_to_wait_for.append(task)
+
+    if not tasks_to_wait_for:
+        return
+
+    # Gather every task result without letting one failure crash home()
+    results = await asyncio.gather(*tasks_to_wait_for, return_exceptions=True)
+
+    # Optional: print unexpected exceptions for debugging
+    for result in results:
+        if isinstance(result, Exception) and not isinstance(result, asyncio.CancelledError):
+            print(f"Task cleanup warning: {result!r}", file=sys.stderr)
 
 async def evdev_listener(dev_path: str, cmd_q: asyncio.Queue):
     dev = InputDevice(dev_path)
@@ -589,81 +785,108 @@ async def evdev_listener(dev_path: str, cmd_q: asyncio.Queue):
     except OSError:
         pass
 
-    async for event in dev.async_read_loop():
-        if event.type == ecodes.EV_KEY:
-            if event.value == 1 and event.code in KEY_TO_CMD:
-                await cmd_q.put(KEY_TO_CMD[event.code])
+    try:
+        async for event in dev.async_read_loop():
+            if event.type == ecodes.EV_KEY:
+                if event.value == 1 and event.code in KEY_TO_CMD:
+                    await cmd_q.put(KEY_TO_CMD[event.code])
+
+    except asyncio.CancelledError:
+        # Normal shutdown path
+        raise
+
+    except Exception as e:
+        # Ignore shutdown-related evdev race conditions
+        if "InvalidStateError" not in type(e).__name__:
+            raise
+
+    finally:
+        with contextlib.suppress(Exception):
+            dev.ungrab()
+        with contextlib.suppress(Exception):
+            dev.close()
 
 async def dispatch_cmd(cmd: str):
+    global launch_controller
     cmd = cmd.strip()
 
     # Remote Input all 5 panels
+    # Outer Security (remote)
     if cmd == "1a":
         await home()
-        # Outer Security (remote)
         panel = random.randint(0, len(PANELS) - 1)
         await schedule_task(panel, outer_security_sequence(panel))
+    # Inner Security (remote)
     elif cmd == "2a":
         await home()
-        # Inner Security (remote)
         panel = random.randint(0, len(PANELS) - 1)
         await schedule_task(panel, inner_security_sequence(panel))
+    # Not Authenticated (remote)
+    elif cmd == "4a":
+        await home()
+        panel = random.randint(0, len(PANELS) - 1)
+        await schedule_task(panel, not_authenticated_sequence(panel))
+    # Auto Launch Sequence (remote)
     elif cmd == "3a":
         await home()
         play_pas()
-
-        # Launch Sequence (remote)
         for panel in range(len(PANELS)):
-            task = asyncio.create_task(launch_sequence_per_panel(panel))
-            panel_tasks[panel] = task
-    elif cmd == "4a":
+            start_panel_task(panel, launch_sequence_per_panel(panel))
+    # Step through Launch Sequence (remote)
+    elif cmd == "7a":
         await home()
-        # Not Authenticated (remote)
-        panel = random.randint(0, len(PANELS) - 1)
-        await schedule_task(panel, not_authenticated_sequence(panel))
+        play_pas()
+        launch_controller = LeadPauseController(leader_panel=0)
+        for panel in range(len(PANELS)):
+            start_panel_task(panel, launch_sequence_step_through(panel))
+    elif cmd == "step":
+        if launch_controller is not None:
+            launch_controller.resume()
+    # Lamp Test (remote)
     elif cmd == "5a":
         await home()
-        # Lamp Test (remote)
         await schedule_task(0, lamp_test_sequence())
     elif cmd == "6a":
         await home()
         play_pas()
 
     # Button Input (b) panels 1 & 2 only
+
+    # Outer Security (button)
     elif cmd == "1b":
         await home()
-        # Outer Security (button)
         panel = random.randint(0, 1)
         await schedule_task(panel, outer_security_sequence(panel))
+    # Inner Security (button)
     elif cmd == "2b":
         await home()
-        # Inner Security (button)
         panel = random.randint(0, 1)
         await schedule_task(panel, inner_security_sequence(panel))
+    # Auto Launch Sequence (button)
     elif cmd == "3b":
         await home()
         play_pas()
-
-        # Launch Sequence (button)
         for panel in range(2):
-            task = asyncio.create_task(launch_sequence_per_panel(panel))
-            panel_tasks[panel] = task
+            start_panel_task(panel, launch_sequence_per_panel(panel))
+    # Not Authenticated (button)
     elif cmd == "4b":
         await home()
-        # Not Authenticated (button)
         panel = random.randint(0, 1)
         await schedule_task(panel, not_authenticated_sequence(panel))
+    # Lamp Test (button)
     elif cmd == "5b":
         await home()
-        # Lamp Test (button)
         await schedule_task(0, lamp_test_sequence())
-        
-    elif cmd == "0":
+    # Home
+    elif cmd == "home":
         await home()
+    # Quit program
     elif cmd == "q":
         raise SystemExit
+    # Increase volume
     elif cmd == "+":
         change_volume(+2)
+    # Decrease volume
     elif cmd == "-":
         change_volume(-2)
     
@@ -700,14 +923,24 @@ async def main():
         pass
     # cancel and wait for task cleanup
     finally:
+        BTN0.when_pressed = None
+        BTN1.when_pressed = None
+        BTN2.when_pressed = None
+        BTN3.when_pressed = None
+        BTN4.when_pressed = None
+
+        tasks = list(panel_tasks.values())
+        panel_tasks.clear()
+        await cancel_all_tasks(tasks)
+
         listener_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await listener_task
 
         stop_all_sounds()
-        pygame.mixer.quit()
-        
-        show_panels("\n[1] Out [2] In [3] Launch [4] Not Auth [5] Lamp Test [0] Reset > ")
+
+        if mixer_ready():
+            pygame.mixer.quit()
 
 if __name__ == "__main__":
     try:
