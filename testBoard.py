@@ -70,7 +70,7 @@ KEY_TO_CMD = {
 # ---------- DIRECTORIES -----------
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 SOUNDS_DIR = os.path.join(BASE_DIR, "..", "sounds")
-VOLUME_FILE = os.path.join(BASE_DIR, "volume.txt")
+VOLUME_FILE = "/boot/firmware/volume.txt" # Store volume persistently on the SSD
 
 # ---------- PINS -----------
 # BCM numbers
@@ -124,7 +124,7 @@ panel_tasks = {}
 # ---------- AUDIO SETUP ----------
 MAX_VOLUME = 90
 MIN_VOLUME = 0
-DEFAULT_VOLUME = 30
+DEFAULT_VOLUME = 65
 
 # Pygame sound objects
 bell_1s_sound = None
@@ -613,16 +613,43 @@ def clamp_volume(vol: int) -> int:
     return max(MIN_VOLUME, min(MAX_VOLUME, vol))
 
 def save_volume(volume: int):
-    volume = clamp_volume(volume)
-    with open(VOLUME_FILE, "w", encoding="utf-8") as f:
-        f.write(f"{volume}\n")
+    cleaned = clamp_volume(int(volume))
+    temp_file = VOLUME_FILE + ".tmp"
+
+    try:
+        with open(temp_file, "w", encoding="utf-8") as f:
+            f.write(f"{cleaned}\n")
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(temp_file, VOLUME_FILE) # atomic replace
+
+    except OSError as e:
+        print(f"Error saving volume: {e}", file=sys.stderr)
+
+    return cleaned
 
 def load_volume() -> int:
     try:
         with open(VOLUME_FILE, "r", encoding="utf-8") as f:
-            return clamp_volume(int(f.read().strip()))
-    except (FileNotFoundError, ValueError):
-        return DEFAULT_VOLUME  # Default volume
+            raw = f.read().strip()
+
+            if not raw:
+                raise ValueError("Volume file is empty")
+            
+            parsed = int(raw)
+
+            if parsed < MIN_VOLUME or parsed > MAX_VOLUME:
+                raise ValueError(f"Volume {parsed} out of range, resetting to default {DEFAULT_VOLUME}")
+
+            return parsed
+            
+    except (FileNotFoundError, ValueError) as e:
+        print(f"Error loading volume ({e}), using default {DEFAULT_VOLUME}", file=sys.stderr)
+        return save_volume(DEFAULT_VOLUME)
+    
+    except OSError as e:
+        print(f"Error accessing volume file ({e}), using default {DEFAULT_VOLUME}", file=sys.stderr)
+        return save_volume(DEFAULT_VOLUME)
 
 def apply_volume(vol: int):
     # Apply volume to ALSA mixer and pygame sounds
@@ -643,7 +670,7 @@ def apply_volume(vol: int):
 def change_volume(delta: int) -> int:
     current_volume = load_volume()
     new_vol = clamp_volume(current_volume + delta)
-    save_volume(new_vol)
+    new_vol = save_volume(new_vol)
     apply_volume(new_vol)
     return new_vol
 
