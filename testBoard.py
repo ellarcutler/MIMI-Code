@@ -656,8 +656,11 @@ def apply_volume(vol: int):
     vol = clamp_volume(vol)
 
     # Keep your hardware/ALSA volume
-    m = alsaaudio.Mixer('Digital')
-    m.setvolume(vol)
+    try:
+        m = alsaaudio.Mixer('Digital')
+        m.setvolume(vol)
+    except alsaaudio.ALSAAudioError as e:
+        print(f"Warning: Could not set ALSA volume ({e})", file=sys.stderr)
 
     # pygame volume uses 0.0 to 1.0, so convert from 0-90.
     pygame_vol = vol / MAX_VOLUME if MAX_VOLUME > 0 else 0.0
