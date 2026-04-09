@@ -125,6 +125,8 @@ panel_tasks = {}
 MAX_VOLUME = 90
 MIN_VOLUME = 0
 DEFAULT_VOLUME = 65
+BUZZER_BOOST = 1.2  # Multiplier applied only to buzzer sounds (capped at 1.0)
+BELL_BOOST = 1.5    # Multiplier applied only to bell sounds (capped at 1.0)
 
 # Pygame sound objects
 bell_1s_sound = None
@@ -665,10 +667,14 @@ def apply_volume(vol: int):
     # pygame volume uses 0.0 to 1.0, so convert from 0-90.
     pygame_vol = vol / MAX_VOLUME if MAX_VOLUME > 0 else 0.0
 
-    sounds = [bell_1s_sound, bell_2s_sound, buzzer_1s_sound, buzzer_2s_sound, pas_sound]
-    for snd in sounds:
+    if pas_sound is not None:
+        pas_sound.set_volume(pygame_vol)
+    for snd in [bell_1s_sound, bell_2s_sound]:
         if snd is not None:
-            snd.set_volume(pygame_vol)
+            snd.set_volume(min(1.0, pygame_vol * BELL_BOOST))
+    for snd in [buzzer_1s_sound, buzzer_2s_sound]:
+        if snd is not None:
+            snd.set_volume(min(1.0, pygame_vol * BUZZER_BOOST))
 
 def change_volume(delta: int) -> int:
     current_volume = load_volume()
