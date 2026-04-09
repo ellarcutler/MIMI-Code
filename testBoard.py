@@ -845,7 +845,10 @@ async def cancel_all_tasks(tasks):
             print(f"Task cleanup warning: {result!r}", file=sys.stderr)
 
 async def evdev_listener(dev_path: str, cmd_q: asyncio.Queue):
-    dev = InputDevice(dev_path)
+    try:
+        dev = InputDevice(dev_path)
+    except (FileNotFoundError, OSError):
+        return  # No remote plugged in — run without it
 
     try:
         dev.grab()
