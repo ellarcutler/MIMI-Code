@@ -599,7 +599,7 @@ def initialize_audio():
     PAS_CHANNEL = pygame.mixer.Channel(2)
 
     # Load clips once at startup
-    bell_1s_sound = pygame.mixer.Sound(os.path.join(SOUNDS_DIR, "bell_1s2.wav"))
+    bell_1s_sound = pygame.mixer.Sound(os.path.join(SOUNDS_DIR, "bell_1s.wav"))
     bell_2s_sound = pygame.mixer.Sound(os.path.join(SOUNDS_DIR, "bell_2s.wav"))
     buzzer_1s_sound = pygame.mixer.Sound(os.path.join(SOUNDS_DIR, "buzzer_1s.wav"))
     buzzer_2s_sound = pygame.mixer.Sound(os.path.join(SOUNDS_DIR, "buzzer_2s.wav"))
