@@ -985,7 +985,7 @@ async def main():
     
     cmd_q: asyncio.Queue[str] = asyncio.Queue()
 
-    dev_path = "/dev/input/event0"
+    dev_path = "/dev/input/by-id/usb-HAOBO_Technology_USB_Composite_Device_8545124150344637-if02-event-kbd"
 
     main_loop = asyncio.get_running_loop()
     BTN0.when_pressed = lambda: handle_button_press(main_loop, cmd_q, "1b")
