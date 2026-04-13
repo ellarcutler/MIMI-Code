@@ -402,6 +402,66 @@ async def launch_sequence_per_panel(panel: int):
         stop_all_sounds()
         raise
 
+async def launch_sequence_single_panel(panel: int):
+    try:
+        current_flags = State.STRATEGIC_ALERT
+
+        # Go through launch sequence
+        current_flags |= State.ENABLED
+        update_panel(panel, current_flags, "BELL")
+        set_panel(panel, current_flags)
+        play_bell_1s()
+        await rand_delay()
+
+        current_flags |= State.LAUNCH_CMD
+        update_panel(panel, current_flags, "BELL")
+        set_panel(panel, current_flags)
+        play_bell_1s()
+        await rand_delay()
+
+        current_flags |= State.LAUNCH_PROC
+        update_panel(panel, current_flags, "BELL")
+        set_panel(panel, current_flags)
+        play_bell_2s()
+        await rand_delay()
+
+        current_flags |= State.INNER_SECURITY
+        update_panel(panel, current_flags, "BUZZER")
+        set_panel(panel, current_flags)
+        play_buzzer_1s()
+        await rand_delay()
+
+        current_flags |= State.OUTER_SECURITY
+        update_panel(panel, current_flags, "BUZZER")
+        set_panel(panel, current_flags)
+        play_buzzer_1s()
+        await rand_delay()
+
+        current_flags |= State.MISSILE_AWAY
+        update_panel(panel, current_flags, "LIFTOFF")
+        set_panel(panel, current_flags)
+
+        # Switch to "after launch" state after 10 seconds
+        await asyncio.sleep(10.0)
+        current_flags = (State.NOT_AUTH | State.FAULT | State.WARHEAD_ALM | State.MISSILE_AWAY |
+                         State.OUTER_SECURITY | State.INNER_SECURITY)
+        update_panel(panel, current_flags, "BUZZER")
+        set_panel(panel, current_flags)
+        play_buzzer_2s()
+
+        # Turn off buzzer after 2 seconds
+        await asyncio.sleep(2.0)
+        update_panel(panel, current_flags, "")
+        set_panel(panel, current_flags)
+        
+
+    except asyncio.CancelledError:
+        # handle task cancellation
+        update_panel(panel, State.STRATEGIC_ALERT, "")
+        set_panel(panel, State.STRATEGIC_ALERT)
+        stop_all_sounds()
+        raise
+
 async def launch_sequence_step_through(panel: int):
     try:
         current_flags = State.STRATEGIC_ALERT
@@ -935,7 +995,7 @@ async def dispatch_cmd(cmd: str):
         play_pas()
         start_launch_group(
             panels=[random.randint(0, len(PANELS) - 1)],
-            sequence_factory=launch_sequence_per_panel,
+            sequence_factory=launch_sequence_single_panel,
             reset_delay=5.0,
         )
     # Step in Launch Sequence (remote)
@@ -979,7 +1039,7 @@ async def dispatch_cmd(cmd: str):
         play_pas()
         start_launch_group(
             panels=[random.randint(0, 1)],
-            sequence_factory=launch_sequence_per_panel,
+            sequence_factory=launch_sequence_single_panel,
             reset_delay=5.0,
         )
     
