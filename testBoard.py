@@ -61,6 +61,7 @@ KEY_TO_CMD = {
     ecodes.KEY_4: "4a", # LAMP TEST (remote)
     ecodes.KEY_7: "7a", # STEP LAUNCH (remote)
     ecodes.KEY_8: "8a", # AUTO LAUNCH (remote)
+    ecodes.KEY_9: "9a", # SINGLE PANEL AUTO LAUNCH (remote)
     ecodes.KEY_NEXTSONG : "step", # LAUNCH SEQUENCE STEP (remote)
     ecodes.KEY_HOMEPAGE: "home", # HOME
     ecodes.KEY_VOLUMEUP: "+", # VOLUME UP
@@ -915,7 +916,7 @@ async def dispatch_cmd(cmd: str):
         play_pas()
         launch_controller = LeadPauseController(leader_panel=0)
         start_launch_group(
-            panels=range(len(PANELS)),
+            panels=[random.randint(0, len(PANELS) - 1)],
             sequence_factory=launch_sequence_step_through,
             reset_delay=5.0
         )
@@ -925,6 +926,15 @@ async def dispatch_cmd(cmd: str):
         play_pas()
         start_launch_group(
             panels=range(len(PANELS)),
+            sequence_factory=launch_sequence_per_panel,
+            reset_delay=5.0,
+        )
+    # Single Panel Auto Launch Sequence (remote)
+    elif cmd == "9a":
+        await home()
+        play_pas()
+        start_launch_group(
+            panels=[random.randint(0, len(PANELS) - 1)],
             sequence_factory=launch_sequence_per_panel,
             reset_delay=5.0,
         )
@@ -968,7 +978,7 @@ async def dispatch_cmd(cmd: str):
         await home()
         play_pas()
         start_launch_group(
-            panels=range(2),
+            panels=[random.randint(0, 1)],
             sequence_factory=launch_sequence_per_panel,
             reset_delay=5.0,
         )
