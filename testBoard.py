@@ -406,6 +406,8 @@ async def launch_sequence_single_panel(panel: int):
     try:
         current_flags = State.STRATEGIC_ALERT
 
+        await rand_delay()
+
         # Go through launch sequence
         current_flags |= State.ENABLED
         update_panel(panel, current_flags, "BELL")
@@ -471,7 +473,7 @@ async def launch_sequence_step_through(panel: int):
         current_flags |= State.ENABLED
         update_panel(panel, current_flags, "BELL")
         set_panel(panel, current_flags)
-        if(panel == 0):
+        if is_leader(panel):
             play_bell_2s()
 
         await leader_checkpoint(panel, 1)
@@ -482,7 +484,7 @@ async def launch_sequence_step_through(panel: int):
         current_flags |= State.LAUNCH_CMD
         update_panel(panel, current_flags, "BELL")
         set_panel(panel, current_flags)
-        if(panel == 0):
+        if is_leader(panel):
             play_bell_2s()
 
         await leader_checkpoint(panel, 2)
@@ -493,7 +495,7 @@ async def launch_sequence_step_through(panel: int):
         current_flags |= State.LAUNCH_PROC
         update_panel(panel, current_flags, "BELL")
         set_panel(panel, current_flags)
-        if(panel == 0):
+        if is_leader(panel):
             play_bell_2s()
 
         await leader_checkpoint(panel, 3)
@@ -504,7 +506,7 @@ async def launch_sequence_step_through(panel: int):
         current_flags |= State.INNER_SECURITY
         update_panel(panel, current_flags, "BUZZER")
         set_panel(panel, current_flags)
-        if(panel == 0):
+        if is_leader(panel):
             play_buzzer_2s()
 
         await leader_checkpoint(panel, 4)
@@ -515,7 +517,7 @@ async def launch_sequence_step_through(panel: int):
         current_flags |= State.OUTER_SECURITY
         update_panel(panel, current_flags, "BUZZER")
         set_panel(panel, current_flags)
-        if(panel == 0):
+        if is_leader(panel):
             play_buzzer_2s()
 
         await leader_checkpoint(panel, 5)
@@ -536,7 +538,7 @@ async def launch_sequence_step_through(panel: int):
         )
         update_panel(panel, current_flags, "BUZZER")
         set_panel(panel, current_flags)
-        if(panel == 0):
+        if is_leader(panel):
             play_buzzer_2s()
 
         await leader_checkpoint(panel, 7)
@@ -593,6 +595,9 @@ async def leader_checkpoint(panel: int, stage: int):
     if panel == launch_controller.leader_panel:
         launch_controller.request_pause(stage)
         await launch_controller.resume_event.wait()
+
+def is_leader(panel: int) -> bool:
+    return launch_controller is not None and panel == launch_controller.leader_panel
 
 async def wait_for_launch_group_and_reset(tasks, delay_s=5.0):
     global launch_reset_task, launch_controller
@@ -974,12 +979,16 @@ async def dispatch_cmd(cmd: str):
     elif cmd == "7a":
         await home()
         play_pas()
-        launch_controller = LeadPauseController(leader_panel=0)
+        selected_panel = random.randint(0, len(PANELS) - 1)
+
+    	# Make the selected panel the leader for this step-through run
+        launch_controller = LeadPauseController(leader_panel=selected_panel)
+
         start_launch_group(
-            panels=[random.randint(0, len(PANELS) - 1)],
+            panels=[selected_panel],
             sequence_factory=launch_sequence_step_through,
             reset_delay=5.0
-        )
+    	)
     # Auto Launch Sequence (remote)
     elif cmd == "8a":
         await home()
