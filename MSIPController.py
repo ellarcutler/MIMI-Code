@@ -14,6 +14,7 @@ from smbus2 import SMBus
 import alsaaudio
 import os
 import pygame
+import glob
 
 # ---------- STATES ----------
 
@@ -850,37 +851,48 @@ async def cancel_all_tasks(tasks):
         if isinstance(result, Exception) and not isinstance(result, asyncio.CancelledError):
             print(f"Task cleanup warning: {result!r}", file=sys.stderr)
 
-async def evdev_listener(dev_path: str, cmd_q: asyncio.Queue):
-    try:
-        dev = InputDevice(dev_path)
-    except (FileNotFoundError, OSError):
-        return  # No remote plugged in — run without it
+async def evdev_listener(cmd_q: asyncio.Queue):
+    dev = None
+    path_pattern = "/dev/input/by-id/*-event-kbd"
 
-    try:
-        dev.grab()
-    except OSError:
-        pass
+    while True:
+        try:
+            # If we are not connected yet, keep searching
+            if dev is None:
+                matches = glob.glob(path_pattern)
 
-    try:
-        async for event in dev.async_read_loop():
-            if event.type == ecodes.EV_KEY:
-                if event.value == 1 and event.code in KEY_TO_CMD:
-                    await cmd_q.put(KEY_TO_CMD[event.code])
+                if not matches:
+                    await asyncio.sleep(1.0)
+                    continue
 
-    except asyncio.CancelledError:
-        # Normal shutdown path
-        raise
+                # Use the first matching input device
+                dev = InputDevice(matches[0])
 
-    except Exception as e:
-        # Ignore shutdown-related evdev race conditions
-        if "InvalidStateError" not in type(e).__name__:
+                try:
+                    dev.grab()
+                except OSError:
+                    pass
+
+                print(f"Connected to remote: {dev.path}")
+
+            async for event in dev.async_read_loop():
+                if event.type == ecodes.EV_KEY:
+                    if event.value == 1 and event.code in KEY_TO_CMD:
+                        await cmd_q.put(KEY_TO_CMD[event.code])
+
+        except asyncio.CancelledError:
             raise
 
-    finally:
-        with contextlib.suppress(Exception):
-            dev.ungrab()
-        with contextlib.suppress(Exception):
-            dev.close()
+        except Exception:
+            # Device was likely unplugged or disappeared
+            if dev is not None:
+                with contextlib.suppress(Exception):
+                    dev.ungrab()
+                with contextlib.suppress(Exception):
+                    dev.close()
+                dev = None
+
+            await asyncio.sleep(1.0)
 
 async def dispatch_cmd(cmd: str):
     global launch_controller
@@ -992,8 +1004,6 @@ async def main():
     
     cmd_q: asyncio.Queue[str] = asyncio.Queue()
 
-    dev_path = "/dev/input/by-id/usb-HAOBO_Technology_USB_Composite_Device_8545124150344637-if02-event-kbd"
-
     main_loop = asyncio.get_running_loop()
     BTN0.when_pressed = lambda: handle_button_press(main_loop, cmd_q, "1b")
     BTN1.when_pressed = lambda: handle_button_press(main_loop, cmd_q, "2b")
@@ -1001,7 +1011,7 @@ async def main():
     BTN3.when_pressed = lambda: handle_button_press(main_loop, cmd_q, "4b")
     BTN4.when_pressed = lambda: handle_button_press(main_loop, cmd_q, "5b")
 
-    listener_task = asyncio.create_task(evdev_listener(dev_path, cmd_q))
+    listener_task = asyncio.create_task(evdev_listener(cmd_q))
 
     # run loop + clean shutdown
     try:
