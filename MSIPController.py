@@ -708,9 +708,10 @@ def play_on_channel(channel, sound_obj):
 
     unmute_for_playback()
 
-    # Restart the sound if already playing on this channel
-    channel.stop()
-    channel.play(sound_obj)
+    if channel.get_busy():
+        channel.queue(sound_obj)  # extend: play after current finishes
+    else:
+        channel.play(sound_obj)   # nothing playing, start immediately
 
     return channel
 
