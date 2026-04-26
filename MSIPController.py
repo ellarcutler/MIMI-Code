@@ -73,6 +73,8 @@ KEY_TO_CMD = {
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 SOUNDS_DIR = os.path.join(BASE_DIR, "..", "sounds")
 VOLUME_FILE = "/boot/firmware/volume.txt" # Store volume persistently on the SSD
+VOLUME_FMT  = "{:04d}\n"   # always exactly 5 bytes: e.g. "0065\n"
+VOLUME_SIZE = 5
 
 # ---------- PINS -----------
 # BCM numbers
@@ -583,29 +585,50 @@ def initialize_display():
 
 def initialize_audio():
     global bell_1s_sound, bell_2s_sound, buzzer_1s_sound, buzzer_2s_sound, pas_sound
-
-    # Start pygame mixer
-    pygame.mixer.init(frequency=44100, size=-16, channels=2, buffer=1024)
-
-    # Give ourselves several channels so sounds can overlap
-    pygame.mixer.set_num_channels(16)
-
     global BELL_CHANNEL, BUZZER_CHANNEL, PAS_CHANNEL
 
-    BELL_CHANNEL = pygame.mixer.Channel(0)
-    BUZZER_CHANNEL = pygame.mixer.Channel(1)
-    PAS_CHANNEL = pygame.mixer.Channel(2)
-
-    # Load clips once at startup
-    bell_1s_sound = pygame.mixer.Sound(os.path.join(SOUNDS_DIR, "bell_1s.wav"))
-    bell_2s_sound = pygame.mixer.Sound(os.path.join(SOUNDS_DIR, "bell_2s.wav"))
-    buzzer_1s_sound = pygame.mixer.Sound(os.path.join(SOUNDS_DIR, "buzzer_1s.wav"))
-    buzzer_2s_sound = pygame.mixer.Sound(os.path.join(SOUNDS_DIR, "buzzer_2s.wav"))
-    pas_sound = pygame.mixer.Sound(os.path.join(SOUNDS_DIR, "pas_3s.wav"))
-
-    # Apply saved volume
     vol = load_volume()
-    apply_volume(vol)
+
+    try:
+        # Start pygame mixer
+        pygame.mixer.init(frequency=44100, size=-16, channels=2, buffer=1024)
+
+        # Give ourselves several channels so sounds can overlap
+        pygame.mixer.set_num_channels(16)
+
+        BELL_CHANNEL = pygame.mixer.Channel(0)
+        BUZZER_CHANNEL = pygame.mixer.Channel(1)
+        PAS_CHANNEL = pygame.mixer.Channel(2)
+
+        # Load clips once at startup
+        bell_1s_sound = pygame.mixer.Sound(os.path.join(SOUNDS_DIR, "bell_1s.wav"))
+        bell_2s_sound = pygame.mixer.Sound(os.path.join(SOUNDS_DIR, "bell_2s.wav"))
+        buzzer_1s_sound = pygame.mixer.Sound(os.path.join(SOUNDS_DIR, "buzzer_1s.wav"))
+        buzzer_2s_sound = pygame.mixer.Sound(os.path.join(SOUNDS_DIR, "buzzer_2s.wav"))
+        pas_sound = pygame.mixer.Sound(os.path.join(SOUNDS_DIR, "pas_3s.wav"))
+
+        apply_volume(vol)
+        print("Audio initialized")
+
+    except (pygame.error, FileNotFoundError, OSError) as e:
+        print(f"Warning: audio disabled: {e}", file=sys.stderr)
+
+        # Leave all audio objects as None so play_* functions safely do nothing
+        bell_1s_sound = None
+        bell_2s_sound = None
+        buzzer_1s_sound = None
+        buzzer_2s_sound = None
+        pas_sound = None
+
+        BELL_CHANNEL = None
+        BUZZER_CHANNEL = None
+        PAS_CHANNEL = None
+
+        # Make sure pygame is not left half-initialized
+        with contextlib.suppress(Exception):
+            pygame.mixer.quit()
+
+        mute_audio()
 
     return vol
 
@@ -614,48 +637,54 @@ def clamp_volume(vol: int) -> int:
 
 def save_volume(volume: int):
     cleaned = clamp_volume(int(volume))
-    temp_file = VOLUME_FILE + ".tmp"
 
     try:
-        with open(temp_file, "w", encoding="utf-8") as f:
-            f.write(f"{cleaned}\n")
+        # Open in r+b to overwrite in-place (never changes file size)
+        with open(VOLUME_FILE, "r+b") as f:
+            f.write(VOLUME_FMT.format(cleaned).encode("ascii"))
             f.flush()
             os.fsync(f.fileno())
-        os.replace(temp_file, VOLUME_FILE) # atomic replace
 
-    except OSError as e:
-        print(f"Error saving volume: {e}", file=sys.stderr)
+    except (FileNotFoundError, OSError):
+        # File doesn't exist yet — create it at the correct fixed size
+        with open(VOLUME_FILE, "wb") as f:
+            f.write(VOLUME_FMT.format(cleaned).encode("ascii"))
+            f.flush()
+            os.fsync(f.fileno())
 
     return cleaned
 
 def load_volume() -> int:
     try:
-        with open(VOLUME_FILE, "r", encoding="utf-8") as f:
+        with open(VOLUME_FILE, "r", encoding="ascii") as f:
             raw = f.read().strip()
 
             if not raw:
                 raise ValueError("Volume file is empty")
-            
+
             parsed = int(raw)
 
             if parsed < MIN_VOLUME or parsed > MAX_VOLUME:
-                raise ValueError(f"Volume {parsed} out of range, resetting to default {DEFAULT_VOLUME}")
+                raise ValueError(f"Volume {parsed} out of range")
 
             return parsed
-            
+
     except (FileNotFoundError, ValueError) as e:
         print(f"Error loading volume ({e}), using default {DEFAULT_VOLUME}", file=sys.stderr)
-        return save_volume(DEFAULT_VOLUME)
-    
+        try:
+            return save_volume(DEFAULT_VOLUME)
+        except OSError:
+            return DEFAULT_VOLUME  # give up writing, just use the default in memory
+
     except OSError as e:
         print(f"Error accessing volume file ({e}), using default {DEFAULT_VOLUME}", file=sys.stderr)
-        return save_volume(DEFAULT_VOLUME)
+        return DEFAULT_VOLUME  # Don't try to write on a read error
 
 def apply_volume(vol: int):
     # Apply volume to ALSA mixer and pygame sounds
     vol = clamp_volume(vol)
 
-    # Keep your hardware/ALSA volume
+    # Keep hardware/ALSA volume
     try:
         m = alsaaudio.Mixer('Digital')
         m.setvolume(vol)
