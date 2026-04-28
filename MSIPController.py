@@ -2,15 +2,12 @@ import asyncio
 import random
 import sys
 from enum import IntFlag, auto
-from concurrent.futures import ThreadPoolExecutor
 import evdev
-from evdev import InputDevice, categorize, ecodes
+from evdev import InputDevice, ecodes
 import contextlib
 from gpiozero import OutputDevice, Button
 import spidev
 import time
-import subprocess
-from smbus2 import SMBus
 import alsaaudio
 import os
 import pygame
@@ -129,8 +126,6 @@ panel_tasks = {}
 MAX_VOLUME = 90
 MIN_VOLUME = 0
 DEFAULT_VOLUME = 65
-BUZZER_BOOST = 1.2  # Multiplier applied only to buzzer sounds (capped at 1.0)
-BELL_BOOST = 1.5    # Multiplier applied only to bell sounds (capped at 1.0)
 
 # Pygame sound objects
 bell_1s_sound = None
@@ -348,68 +343,6 @@ async def launch_sequence_per_panel(panel: int):
         current_flags = State.STRATEGIC_ALERT
 
         await rand_delay() # random delay before starting sequence
-
-        # Go through launch sequence
-        current_flags |= State.ENABLED
-        update_panel(panel, current_flags, "BELL")
-        set_panel(panel, current_flags)
-        play_bell_1s()
-        await rand_delay()
-
-        current_flags |= State.LAUNCH_CMD
-        update_panel(panel, current_flags, "BELL")
-        set_panel(panel, current_flags)
-        play_bell_1s()
-        await rand_delay()
-
-        current_flags |= State.LAUNCH_PROC
-        update_panel(panel, current_flags, "BELL")
-        set_panel(panel, current_flags)
-        play_bell_2s()
-        await rand_delay()
-
-        current_flags |= State.INNER_SECURITY
-        update_panel(panel, current_flags, "BUZZER")
-        set_panel(panel, current_flags)
-        play_buzzer_1s()
-        await rand_delay()
-
-        current_flags |= State.OUTER_SECURITY
-        update_panel(panel, current_flags, "BUZZER")
-        set_panel(panel, current_flags)
-        play_buzzer_1s()
-        await rand_delay()
-
-        current_flags |= State.MISSILE_AWAY
-        update_panel(panel, current_flags, "LIFTOFF")
-        set_panel(panel, current_flags)
-
-        # Switch to "after launch" state after 10 seconds
-        await asyncio.sleep(10.0)
-        current_flags = (State.NOT_AUTH | State.FAULT | State.WARHEAD_ALM | State.MISSILE_AWAY |
-                         State.OUTER_SECURITY | State.INNER_SECURITY)
-        update_panel(panel, current_flags, "BUZZER")
-        set_panel(panel, current_flags)
-        play_buzzer_2s()
-
-        # Turn off buzzer after 2 seconds
-        await asyncio.sleep(2.0)
-        update_panel(panel, current_flags, "")
-        set_panel(panel, current_flags)
-        
-
-    except asyncio.CancelledError:
-        # handle task cancellation
-        update_panel(panel, State.STRATEGIC_ALERT, "")
-        set_panel(panel, State.STRATEGIC_ALERT)
-        stop_all_sounds()
-        raise
-
-async def launch_sequence_single_panel(panel: int):
-    try:
-        current_flags = State.STRATEGIC_ALERT
-
-        await rand_delay()
 
         # Go through launch sequence
         current_flags |= State.ENABLED
@@ -696,12 +629,9 @@ def apply_volume(vol: int):
 
     if pas_sound is not None:
         pas_sound.set_volume(pygame_vol)
-    for snd in [bell_1s_sound, bell_2s_sound]:
+    for snd in [bell_1s_sound, bell_2s_sound, buzzer_1s_sound, buzzer_2s_sound]:
         if snd is not None:
-            snd.set_volume(min(1.0, pygame_vol * BELL_BOOST))
-    for snd in [buzzer_1s_sound, buzzer_2s_sound]:
-        if snd is not None:
-            snd.set_volume(min(1.0, pygame_vol * BUZZER_BOOST))
+            snd.set_volume(pygame_vol)
 
 def change_volume(delta: int) -> int:
     current_volume = load_volume()
@@ -771,12 +701,6 @@ def select_panel(n: int):
     MUX1.value = (n >> 1) & 1
     MUX0.value = (n >> 0) & 1
 
-def strobe_latch():
-    STROBE_CS_L.off()
- 
-    time.sleep(10e-6)
-    STROBE_CS_L.on()
-
 def flags_to_word(flags: State) -> int:
     word = 0
     for st, mask in STATE_TO_MASK.items():
@@ -795,7 +719,6 @@ def write_panel(panel: int, flags: State):
     STROBE_CS_L.off()
     time.sleep(10e-6)
     STROBE_CS_L.on()
-    #strobe_latch()
 
 def set_panel(panel: int, flags: State):
     panel_state[panel] = flags
@@ -806,20 +729,6 @@ def handle_button_press(loop, q, cmd):
 
 async def rand_delay():
     await asyncio.sleep(random.uniform(4.0, 8.0))
-
-async def step_delay(panel: int, min_s=4.0, max_s=8.0):
-    global launch_controller
-
-    remaining = random.uniform(min_s, max_s)
-    tick = 0.1
-
-    while remaining > 0:
-        if launch_controller is not None and launch_controller.pause_requested:
-            await launch_controller.resume_event.wait()
-
-        sleep_time = min(tick, remaining)
-        await asyncio.sleep(sleep_time)
-        remaining -= sleep_time
 
 def start_panel_task(panel, coro):
     task = asyncio.create_task(coro)
@@ -835,10 +744,6 @@ async def schedule_task(panel, coro):
     
     start_panel_task(panel, coro)
 
-    # # Start the new panel task
-    # task = asyncio.create_task(coro)
-    # panel_tasks[panel] = task
-    # task.add_done_callback(lambda t, p=panel: panel_tasks.pop(p, None))
 
 async def cancel_and_wait(task: asyncio.Task | None):
     # Cancel one task and wait for it to fully finish cleanup
@@ -975,7 +880,7 @@ async def dispatch_cmd(cmd: str):
         play_pas()
         start_launch_group(
             panels=[random.randint(0, len(PANELS) - 1)],
-            sequence_factory=launch_sequence_single_panel,
+            sequence_factory=launch_sequence_per_panel,
             reset_delay=5.0,
         )
     # Step in Launch Sequence (remote)
@@ -1018,7 +923,7 @@ async def dispatch_cmd(cmd: str):
         play_pas()
         start_launch_group(
             panels=[random.randint(0, 1)],
-            sequence_factory=launch_sequence_single_panel,
+            sequence_factory=launch_sequence_per_panel,
             reset_delay=5.0,
         )
     
