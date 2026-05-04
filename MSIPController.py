@@ -234,6 +234,16 @@ async def home():
 async def not_authenticated_sequence(panel: int):
     try:
         # Not Auth (2) and Outer Sec (3) turn ON.
+        active_state = State.NOT_AUTH
+        
+        # Turn lights on + Buzzer
+        update_panel(panel, active_state, "BUZZER")
+        set_panel(panel, active_state)
+        play_buzzer_2s()
+
+        await rand_delay()
+
+        # Not Auth (2) and Outer Sec (3) turn ON.
         active_state = State.NOT_AUTH | State.OUTER_SECURITY
         
         # Turn lights on + Buzzer
@@ -241,14 +251,11 @@ async def not_authenticated_sequence(panel: int):
         set_panel(panel, active_state)
         play_buzzer_2s()
 
-        # Hold buzzer for 2 seconds
-        await asyncio.sleep(2.0)
-        
+        # Hold state for 3 seconds
+        await rand_delay()
+
         # Silence buzzer, keep lights red
         update_panel(panel, active_state, "") 
-
-        # Hold state for 3 seconds
-        await asyncio.sleep(3.0)
         
         # Reset to home (Green Light)
         update_panel(panel, State.STRATEGIC_ALERT, "") 
